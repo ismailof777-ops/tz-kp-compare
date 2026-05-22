@@ -163,11 +163,15 @@ input[type="text"],
 input[type="search"] { font: inherit; }
 .match-input {
   min-width: 300px;
+  text-overflow: ellipsis;
 }
 .match-help {
   margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+.with-tooltip {
+  cursor: help;
 }
 .file-drop {
   position: relative;
@@ -682,6 +686,16 @@ def page(title: str, body: str) -> bytes:
     const reviewSearch = document.querySelector('[data-review-search]');
     const reviewRows = Array.from(document.querySelectorAll('[data-review-row]'));
     const reviewCount = document.querySelector('[data-review-count]');
+    const requestOptions = Array.from(document.querySelectorAll('#request-options option'));
+    const updateMatchTitle = (input) => {{
+      const option = requestOptions.find((item) => item.value === input.value);
+      input.title = option?.dataset.full || input.value || 'Оставить без сопоставления';
+    }};
+    document.querySelectorAll('.match-input').forEach((input) => {{
+      updateMatchTitle(input);
+      input.addEventListener('input', () => updateMatchTitle(input));
+      input.addEventListener('change', () => updateMatchTitle(input));
+    }});
     if (reviewSearch && reviewRows.length) {{
       const rowText = (row) => (row.textContent + ' ' + (row.querySelector('input')?.value || '')).toLowerCase();
       const updateReviewSearch = () => {{
@@ -909,7 +923,7 @@ def render_review(run_id: str) -> bytes:
         if match.status != "auto" or not match.request_pos or match.reason
     ]
     request_options = "\n".join(
-        f'<option value="{esc(item.pos)} - {esc(item.name[:110])}"></option>'
+        f'<option value="{esc(item.pos)} - {esc(item.name[:110])}" data-full="{esc(item.pos)} - {esc(item.name)}"></option>'
         for item in request_items
     )
     warning_html = "".join(f'<div class="notice warn">{esc(error)}</div>' for error in errors)
@@ -917,8 +931,9 @@ def render_review(run_id: str) -> bytes:
     for idx, match in review_rows:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
         selected_value = f"{selected_item.pos} - {selected_item.name[:110]}" if selected_item else ""
+        selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
         match_input = f"""
-<input class="match-input" type="text" name="match_{idx}" list="request-options" value="{esc(selected_value)}" placeholder="Начните вводить название или номер позиции">
+<input class="match-input with-tooltip" type="text" name="match_{idx}" list="request-options" value="{esc(selected_value)}" title="{esc(selected_title)}" placeholder="Начните вводить название или номер позиции">
 <div class="match-help">Оставьте пустым, если позицию КП не нужно сопоставлять.</div>"""
         status_class = "unmatched" if not match.request_pos else match.status
         if status_class not in {"auto", "review", "unmatched", "manual"}:
@@ -929,7 +944,7 @@ def render_review(run_id: str) -> bytes:
   <td>{match_input}</td>
   <td>{esc(match.supplier_item.supplier)}</td>
   <td class="small">{esc(match.supplier_item.row_no)}</td>
-  <td>{esc(match.supplier_item.name)}</td>
+  <td class="with-tooltip" title="{esc(match.supplier_item.name)}">{esc(match.supplier_item.name)}</td>
   <td class="small">{esc(match.supplier_item.qty)} {esc(match.supplier_item.unit)}</td>
   <td class="small">{esc(match.supplier_item.price)}</td>
   <td>{esc(match.reason or "проверить совпадение")}</td>

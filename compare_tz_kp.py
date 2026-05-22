@@ -1242,7 +1242,7 @@ def fmt_qty(value: float | None) -> str | float:
 def delivery_mark(delivery: str) -> str:
     text = clean_text(delivery)
     if not text:
-        return "-"
+        return "✓"
     if "налич" in text.lower() or "склад" in text.lower():
         return "✓"
     return text
@@ -1464,6 +1464,8 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
             ws.cell(desc_row, start).fill = yellow
             ws.cell(value_row, start + 3).fill = yellow
+            if ws.cell(value_row, start + 4).value == "✓":
+                ws.cell(value_row, start + 4).fill = green
 
         ws.row_dimensions[desc_row].height = 28
         ws.row_dimensions[label_row].height = 21

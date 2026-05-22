@@ -183,6 +183,26 @@ input[type="search"] { font: inherit; }
   color: var(--muted);
   font-size: 12px;
 }
+.match-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+.clear-match {
+  border: 1px solid #f2b9b7;
+  border-radius: 5px;
+  background: #fff7f7;
+  color: #8a2420;
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.clear-match:hover {
+  background: #fdeaea;
+}
 .suggestions {
   display: flex;
   flex-wrap: wrap;
@@ -883,6 +903,16 @@ def page(title: str, body: str) -> bytes:
         input.dispatchEvent(new Event('change', {{ bubbles: true }}));
       }});
     }});
+    document.querySelectorAll('[data-clear-match]').forEach((button) => {{
+      button.addEventListener('click', () => {{
+        const cell = button.closest('td');
+        const input = cell?.querySelector('.match-input');
+        if (!input) return;
+        input.value = '';
+        updateMatchTitle(input);
+        input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+      }});
+    }});
     if (reviewSearch && reviewRows.length) {{
       const rowText = (row) => (row.textContent + ' ' + (row.querySelector('input')?.value || '')).toLowerCase();
       const updateReviewSearch = () => {{
@@ -1152,7 +1182,10 @@ def render_review(run_id: str) -> bytes:
             suggestion_buttons += "</div>"
         match_input = f"""
 <input class="match-input with-tooltip" type="text" name="match_{idx}" list="request-options" value="{esc(selected_value)}" title="{esc(selected_title)}" placeholder="Начните вводить название или номер позиции">
-<div class="match-help">Оставьте пустым, если позицию КП не нужно сопоставлять.</div>
+<div class="match-actions">
+  <button class="clear-match" type="button" data-clear-match>Не сопоставлять</button>
+  <span class="match-help">Если строка КП лишняя или не относится к заявке.</span>
+</div>
 {suggestion_buttons}"""
         status_class = "unmatched" if not match.request_pos else match.status
         if status_class not in {"auto", "review", "unmatched", "manual", "service"}:

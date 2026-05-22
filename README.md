@@ -35,9 +35,15 @@
 
 ```text
 DEEPSEEK_API_KEY=ваш_ключ
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_MAX_AI_ROWS=120
 DEEPSEEK_BATCH_SIZE=20
+```
+
+Если ключ взят не в официальном DeepSeek, а в совместимом сервисе-шлюзе, нужно также указать его адрес. Например для DotPoin:
+
+```text
+DEEPSEEK_API_BASE=https://llms.dotpoin.com/v1
 ```
 
 На Render эти же значения нужно добавить в `Environment Variables`. Ключ нельзя коммитить в GitHub.

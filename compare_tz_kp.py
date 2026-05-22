@@ -18,8 +18,9 @@ from openpyxl.utils import get_column_letter
 from pypdf import PdfReader
 
 
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_API_BASE = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
+DEEPSEEK_API_URL = os.environ.get("DEEPSEEK_API_URL", f"{DEEPSEEK_API_BASE}/chat/completions")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 AI_WARNINGS: list[str] = []
 
 
@@ -34,6 +35,14 @@ def get_ai_warnings() -> list[str]:
 def record_ai_warning(message: str) -> None:
     if message not in AI_WARNINGS:
         AI_WARNINGS.append(message)
+
+
+def deepseek_api_url() -> str:
+    api_url = os.environ.get("DEEPSEEK_API_URL", "").strip()
+    if api_url:
+        return api_url
+    api_base = os.environ.get("DEEPSEEK_API_BASE", DEEPSEEK_API_BASE).strip().rstrip("/")
+    return f"{api_base}/chat/completions"
 
 
 def load_env_file(path: Path | None = None) -> None:
@@ -610,11 +619,10 @@ def call_deepseek(payload: dict) -> dict | None:
             },
         ],
         "response_format": {"type": "json_object"},
-        "thinking": {"type": "disabled"},
         "temperature": 0,
     }
     request = urllib.request.Request(
-        DEEPSEEK_API_URL,
+        deepseek_api_url(),
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",

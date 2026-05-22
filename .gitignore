@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.python-version
+
+outputs/
+extracted/
+Gmail.zip
+*.jpg
+*.jpeg
+*.png
+
+.env
+.venv/
+venv/

@@ -425,6 +425,76 @@ def length_m_from_text(text: str) -> float | None:
 
 
 @lru_cache(maxsize=40000)
+def long_dimension_m_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    patterns = [
+        r"(?:l|длина)\s*=?\s*(\d+(?:\.\d+)?)\s*мм",
+        r"\b(\d{3,5}(?:\.\d+)?)\s*мм\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source):
+            value = parse_number(match.group(1))
+            if value and 100 <= value <= 20000:
+                return value / 1000
+    dims = _dimensions_m_from_text(text)
+    if dims:
+        longest = max(dims)
+        if 0.1 <= longest <= 20:
+            return longest
+    return None
+
+
+@lru_cache(maxsize=40000)
+def package_count_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    patterns = [
+        r"(\d+(?:\.\d+)?)\s*шт\s*/\s*(?:уп|упак|пачк|кор)",
+        r"(?:уп|упак|пачк|кор)[^\d]{0,20}(\d+(?:\.\d+)?)\s*шт",
+        r"(\d+(?:\.\d+)?)\s*шт\s*/",
+        r"(\d+(?:\.\d+)?)\s*шт\s*[,) ]",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source):
+            value = parse_number(match.group(1))
+            if value and 1 < value <= 10000:
+                return value
+    return None
+
+
+@lru_cache(maxsize=40000)
+def package_kg_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    patterns = [
+        r"(\d+(?:\.\d+)?)\s*кг\s*/\s*(?:уп|упак|пачк|меш)",
+        r"(?:уп|упак|пачк|меш)[^\d]{0,20}(\d+(?:\.\d+)?)\s*кг",
+        r"\b(\d+(?:\.\d+)?)\s*кг\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source):
+            value = parse_number(match.group(1))
+            if value and 0.05 <= value <= 1000:
+                return value
+    return None
+
+
+@lru_cache(maxsize=40000)
+def package_linear_m_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    patterns = [
+        r"(\d+(?:\.\d+)?)\s*(?:м\.?п\.?|п\.?м\.?|мп)\s*/\s*(?:уп|упак|пачк|кор)",
+        r"(?:уп|упак|пачк|кор)[^\d]{0,20}(\d+(?:\.\d+)?)\s*(?:м\.?п\.?|п\.?м\.?|мп)",
+        r"/\s*(\d+(?:\.\d+)?)\s*(?:м\.?п\.?|п\.?м\.?|мп)",
+        r"(\d+(?:\.\d+)?)\s*(?:м\.?п\.?|п\.?м\.?|мп)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source):
+            value = parse_number(match.group(1))
+            if value and 0.05 <= value <= 10000:
+                return value
+    return None
+
+
+@lru_cache(maxsize=40000)
 def is_linear_profile_text(text: str) -> bool:
     normalized = normalize(text)
     markers = {
@@ -437,6 +507,10 @@ def is_linear_profile_text(text: str) -> bool:
         "подвес",
         "уголок",
         "направляющая",
+        "доска",
+        "брус",
+        "пиломатериал",
+        "вагонка",
     }
     return any(marker in normalized for marker in markers)
 
@@ -498,14 +572,46 @@ def converted_quantity(request: RequestItem, offer: SupplierItem) -> tuple[float
     request_volume = volume_m3_from_text(request.name)
     offer_length = length_m_from_text(offer.name)
     request_length = length_m_from_text(request.name)
+    offer_long_dimension = long_dimension_m_from_text(offer.name)
+    request_long_dimension = long_dimension_m_from_text(request.name)
+    offer_pack_count = package_count_from_text(offer.name)
+    request_pack_count = package_count_from_text(request.name)
+    offer_pack_kg = package_kg_from_text(offer.name)
+    request_pack_kg = package_kg_from_text(request.name)
+    offer_pack_m = package_linear_m_from_text(offer.name)
+    request_pack_m = package_linear_m_from_text(request.name)
     combined_text = f"{offer.name} {request.name}"
 
+    if req_unit == "pcs" and offer_unit == "pack":
+        count = first_number(offer_pack_count, request_pack_count)
+        if count:
+            return offer.qty * count, "pcs"
+    if offer_unit == "pcs" and req_unit == "pack":
+        count = first_number(request_pack_count, offer_pack_count)
+        if count:
+            return offer.qty / count, "pack"
+    if req_unit == "kg" and offer_unit == "pack":
+        kg = first_number(offer_pack_kg, request_pack_kg)
+        if kg:
+            return offer.qty * kg, "kg"
+    if offer_unit == "kg" and req_unit == "pack":
+        kg = first_number(request_pack_kg, offer_pack_kg)
+        if kg:
+            return offer.qty / kg, "pack"
+    if req_unit == "m" and offer_unit == "pack":
+        meters = first_number(offer_pack_m, request_pack_m)
+        if meters:
+            return offer.qty * meters, "m"
+    if offer_unit == "m" and req_unit == "pack":
+        meters = first_number(request_pack_m, offer_pack_m)
+        if meters:
+            return offer.qty / meters, "pack"
     if req_unit == "m" and offer_unit in {"pcs", "sheet"}:
-        length = first_number(offer_length, request_length)
+        length = first_number(offer_length, request_length, offer_long_dimension, request_long_dimension)
         if length:
             return offer.qty * length, "m"
     if offer_unit == "m" and req_unit in {"pcs", "sheet"}:
-        length = first_number(request_length, offer_length)
+        length = first_number(request_length, offer_length, request_long_dimension, offer_long_dimension)
         if length:
             return offer.qty / length, req_unit
     if req_unit == "m2" and offer_unit in {"pcs", "sheet"}:
@@ -571,19 +677,34 @@ def linear_meter_quantity_check(request: RequestItem, offer: SupplierItem) -> Qu
         return None
     req_unit = normalized_unit(request.unit)
     offer_unit = normalized_unit(offer.unit)
-    linear_units = {"m", "pcs", "sheet"}
+    linear_units = {"m", "pcs", "sheet", "pack"}
     if req_unit not in linear_units or offer_unit not in linear_units or not ({req_unit, offer_unit} & {"pcs", "sheet"}):
         return None
     combined_text = f"{request.name} {offer.name}"
     if not is_linear_profile_text(combined_text):
         return None
-    length = first_number(length_m_from_text(offer.name), length_m_from_text(request.name))
-    if not length:
+    length = first_number(
+        length_m_from_text(offer.name),
+        length_m_from_text(request.name),
+        long_dimension_m_from_text(offer.name),
+        long_dimension_m_from_text(request.name),
+    )
+    request_pack_m = package_linear_m_from_text(request.name)
+    offer_pack_m = package_linear_m_from_text(offer.name)
+    if not length and not request_pack_m and not offer_pack_m:
         return None
-    request_m = request.qty * length if req_unit in {"pcs", "sheet"} else request.qty
-    offer_m = offer.qty * length if offer_unit in {"pcs", "sheet"} else offer.qty
+    request_m = request.qty
+    if req_unit in {"pcs", "sheet"} and length:
+        request_m = request.qty * length
+    elif req_unit == "pack" and request_pack_m:
+        request_m = request.qty * request_pack_m
+    offer_m = offer.qty
+    if offer_unit in {"pcs", "sheet"} and length:
+        offer_m = offer.qty * length
+    elif offer_unit == "pack" and offer_pack_m:
+        offer_m = offer.qty * offer_pack_m
     display = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
-    if offer_unit in {"pcs", "sheet"}:
+    if offer_unit in {"pcs", "sheet", "pack"}:
         unit_label = request.unit if normalized_unit(request.unit) == "m" else "м.п."
         display = f"{display}\n~ {fmt_quantity_value(offer_m)} {unit_label}".strip()
     tolerance = max(0.01, request_m * 0.02)
@@ -1005,6 +1126,9 @@ def call_deepseek(payload: dict) -> dict | None:
                     "Учитывай синонимы, бренды, размеры, единицы измерения и смысл товара. "
                     "Примеры: метиз/шуруп/саморез/крепеж близкие группы; ГКЛ/гипсокартон близкие; "
                     "лист, рулон и упаковка могут соответствовать м2, если площадь указана в названии. "
+                    "Если в названии указано количество в пачке/упаковке, умножай на количество упаковок и сравнивай в штуках. "
+                    "Упаковки клея, смеси и сухих материалов сравнивай в кг, если указан вес упаковки. "
+                    "Доски, профиль, рейки, планки, каркас и брус сравнивай в погонных метрах, если указана длина. "
                     "Не сопоставляй разные бренды, если бренд принципиален. "
                     "Ответь только JSON без пояснений."
                 ),

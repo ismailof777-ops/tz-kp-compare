@@ -200,7 +200,7 @@ input[type="search"] { font: inherit; }
 }
 .file-drop > :not(.file-input) {
   position: relative;
-  z-index: 1;
+  z-index: 4;
   pointer-events: none;
 }
 .file-icon {
@@ -228,7 +228,8 @@ input[type="search"] { font: inherit; }
 }
 .file-list {
   position: relative;
-  z-index: 1;
+  z-index: 5;
+  pointer-events: auto;
   margin-top: 8px;
   color: var(--muted);
   font-size: 13px;
@@ -242,11 +243,39 @@ input[type="search"] { font: inherit; }
 }
 .file-list ul {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 0;
+  list-style: none;
 }
 .file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 2px 0;
+  padding: 5px 6px 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
   overflow-wrap: anywhere;
+}
+.file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.file-remove {
+  flex: 0 0 auto;
+  min-height: 26px;
+  border: 1px solid #e0b7b5;
+  border-radius: 5px;
+  background: #fff5f5;
+  color: #8a2420;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.file-remove:hover {
+  background: #ffe9e9;
 }
 .hint {
   margin-top: 6px;
@@ -298,6 +327,16 @@ input[type="search"] { font: inherit; }
   color: var(--accent);
 }
 .btn.secondary:hover { background: #eef8fb; }
+.btn.stop {
+  display: none;
+  border-color: #d79c99;
+  background: #fff;
+  color: #8a2420;
+}
+.btn.stop.is-visible {
+  display: inline-flex;
+}
+.btn.stop:hover { background: #fff0f0; }
 .stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -486,10 +525,31 @@ def page(title: str, body: str) -> bytes:
       const requestInput = uploadForm.querySelector('input[name="request"]');
       const offersInput = uploadForm.querySelector('input[name="offers"]');
       const formMessage = uploadForm.querySelector('[data-form-message]');
+      const submitButton = uploadForm.querySelector('[data-submit]');
+      const stopButton = uploadForm.querySelector('[data-stop]');
+      const processing = uploadForm.querySelector('[data-processing]');
+      let activeController = null;
       const showMessage = (text) => {{
         if (!formMessage) return;
         formMessage.textContent = text;
         formMessage.style.display = 'block';
+      }};
+      const resetProcessingState = () => {{
+        activeController = null;
+        if (submitButton) {{
+          submitButton.disabled = false;
+          submitButton.textContent = 'Обработать файлы';
+        }}
+        if (stopButton) stopButton.classList.remove('is-visible');
+        if (processing) processing.classList.remove('is-visible');
+      }};
+      const removeInputFile = (input, indexToRemove) => {{
+        const transfer = new DataTransfer();
+        Array.from(input.files || []).forEach((file, index) => {{
+          if (index !== indexToRemove) transfer.items.add(file);
+        }});
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('change', {{ bubbles: true }}));
       }};
       const renderFileList = (input) => {{
         const target = uploadForm.querySelector('[data-file-list="' + input.id + '"]');
@@ -507,9 +567,22 @@ def page(title: str, body: str) -> bytes:
           : 'Выбран файл:';
         target.appendChild(summary);
         const list = document.createElement('ul');
-        files.forEach((file) => {{
+        files.forEach((file, index) => {{
           const item = document.createElement('li');
-          item.textContent = file.name;
+          const name = document.createElement('span');
+          name.className = 'file-name';
+          name.textContent = file.name;
+          const remove = document.createElement('button');
+          remove.className = 'file-remove';
+          remove.type = 'button';
+          remove.textContent = 'Удалить';
+          remove.addEventListener('click', (event) => {{
+            event.preventDefault();
+            event.stopPropagation();
+            removeInputFile(input, index);
+          }});
+          item.appendChild(name);
+          item.appendChild(remove);
           list.appendChild(item);
         }});
         target.appendChild(list);
@@ -559,27 +632,51 @@ def page(title: str, body: str) -> bytes:
           setInputFiles(input, event.dataTransfer.files, input.multiple);
         }});
       }});
-      uploadForm.addEventListener('submit', (event) => {{
+      stopButton?.addEventListener('click', () => {{
+        if (activeController) activeController.abort();
+        resetProcessingState();
+        showMessage('Обработка остановлена. Можно изменить файлы и запустить заново.');
+      }});
+      uploadForm.addEventListener('submit', async (event) => {{
+        event.preventDefault();
         if (!requestInput || !requestInput.files.length) {{
-          event.preventDefault();
           showMessage('Выберите файл заявки / ТЗ.');
           requestInput && requestInput.focus();
           return;
         }}
         if (!offersInput || offersInput.files.length < 2) {{
-          event.preventDefault();
           showMessage('Выберите минимум два КП или счета поставщиков.');
           offersInput && offersInput.focus();
           return;
         }}
         if (formMessage) formMessage.style.display = 'none';
-        const button = uploadForm.querySelector('[data-submit]');
-        const processing = uploadForm.querySelector('[data-processing]');
-        if (button) {{
-          button.disabled = true;
-          button.textContent = 'Обрабатываем...';
+        activeController = new AbortController();
+        if (submitButton) {{
+          submitButton.disabled = true;
+          submitButton.textContent = 'Обрабатываем...';
         }}
+        if (stopButton) stopButton.classList.add('is-visible');
         if (processing) processing.classList.add('is-visible');
+        try {{
+          const response = await fetch(uploadForm.action, {{
+            method: 'POST',
+            body: new FormData(uploadForm),
+            signal: activeController.signal,
+          }});
+          if (response.redirected) {{
+            window.location.href = response.url;
+            return;
+          }}
+          const responseHtml = await response.text();
+          document.open();
+          document.write(responseHtml);
+          document.close();
+        }} catch (error) {{
+          if (error.name !== 'AbortError') {{
+            resetProcessingState();
+            showMessage('Не удалось обработать файлы. Проверьте подключение и попробуйте еще раз.');
+          }}
+        }}
       }});
     }}
     const reviewSearch = document.querySelector('[data-review-search]');
@@ -785,6 +882,7 @@ def render_home(error: str = "") -> bytes:
     </div>
     <div class="actions">
       <button class="btn" type="submit" data-submit>Обработать файлы</button>
+      <button class="btn stop" type="button" data-stop>Остановить обработку</button>
     </div>
     <div class="notice error" data-form-message style="display:none; margin-top:12px; margin-bottom:0"></div>
     <div class="processing" data-processing>

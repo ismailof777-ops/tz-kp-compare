@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import warnings
-
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="cgi")
-
-import cgi
+from email.parser import BytesParser
+from email.policy import default as email_policy
 import html
+import io
 import json
 import mimetypes
 import os
@@ -35,6 +33,12 @@ from compare_tz_kp import (
 ROOT = Path(__file__).resolve().parent
 RUNS_DIR = ROOT / "outputs" / "runs"
 MAX_UPLOAD_SIZE = 80 * 1024 * 1024
+
+
+class UploadedFile:
+    def __init__(self, filename: str, content: bytes):
+        self.filename = filename
+        self.file = io.BytesIO(content)
 
 
 CSS = """
@@ -613,6 +617,31 @@ def safe_filename(filename: str, fallback: str) -> str:
     return cleaned or fallback
 
 
+def parse_multipart_upload(headers, body: bytes) -> dict[str, list[UploadedFile]]:
+    content_type = headers.get("Content-Type", "")
+    if not content_type.lower().startswith("multipart/form-data"):
+        return {}
+
+    message = BytesParser(policy=email_policy).parsebytes(
+        b"Content-Type: "
+        + content_type.encode("utf-8", errors="ignore")
+        + b"\r\nMIME-Version: 1.0\r\n\r\n"
+        + body
+    )
+    files: dict[str, list[UploadedFile]] = {}
+    for part in message.iter_parts():
+        disposition = part.get_content_disposition()
+        if disposition != "form-data":
+            continue
+        field_name = part.get_param("name", header="content-disposition")
+        filename = part.get_filename()
+        if not field_name or not filename:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        files.setdefault(field_name, []).append(UploadedFile(clean_text(filename), payload))
+    return files
+
+
 def request_item_from_dict(data: dict) -> RequestItem:
     return RequestItem(
         pos=clean_text(data.get("pos")),
@@ -948,15 +977,14 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_html(render_home("Файлы слишком большие для локальной MVP-версии."), HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
 
-        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
-        request_field = form["request"] if "request" in form else None
-        offer_fields = form["offers"] if "offers" in form else []
-        if request_field is None or not getattr(request_field, "filename", ""):
+        uploads = parse_multipart_upload(self.headers, self.rfile.read(length))
+        request_fields = uploads.get("request", [])
+        offer_fields = uploads.get("offers", [])
+        request_field = request_fields[0] if request_fields else None
+        if request_field is None or not request_field.filename:
             self.send_html(render_home("Загрузите файл заявки .xlsx."), HTTPStatus.BAD_REQUEST)
             return
-        if not isinstance(offer_fields, list):
-            offer_fields = [offer_fields]
-        offer_fields = [field for field in offer_fields if getattr(field, "filename", "")]
+        offer_fields = [field for field in offer_fields if field.filename]
         if len(offer_fields) < 2:
             self.send_html(render_home("Загрузите минимум два КП или счета."), HTTPStatus.BAD_REQUEST)
             return

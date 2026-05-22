@@ -83,6 +83,52 @@ STOP_WORDS = {
     "белый",
     "оцинкованный",
     "заказ",
+    "цвет",
+    "расход",
+    "аналог",
+}
+
+SERVICE_WORDS = {
+    "доставка",
+    "доставки",
+    "транспортные",
+    "транспортная",
+    "транспорт",
+    "услуга",
+    "услуги",
+    "разгрузка",
+    "подъем",
+}
+
+SYNONYM_GROUPS = {
+    "саморез": {"саморез", "саморезы", "шуруп", "шурупы", "метиз", "метизы", "крепеж", "крепежный", "винт", "клопы", "гм"},
+    "гипсокартон": {"гипсокартон", "гкл", "сапфир"},
+    "мембрана": {"мембрана", "ветрозащита", "ветро", "влагозащита", "пароизоляция", "пароизоляционная", "гидро", "изоспан"},
+    "утеплитель": {"утеплитель", "теплоизоляция", "изоляция", "вата", "минвата", "каменная", "стеклянного"},
+    "профиль": {"профиль", "каркас", "планка", "направляющая", "поперечная", "угловой", "j", "l", "f", "омега", "пи"},
+    "плита": {"плита", "панель", "панели", "аквапанель", "акустическая", "потолочная"},
+    "клей": {"клей", "клеевая", "клеевой", "штукатурно", "смесь", "смеси", "цементная"},
+    "грунтовка": {"грунтовка", "грунт", "тифенгрунт", "ct17", "ст17"},
+    "гидроизоляция": {"гидроизоляция", "гидроизоляционный", "флехендихт", "флэхендихт", "обмазочная"},
+    "пленка": {"пленка", "пленка", "полиэтиленовая", "укрывочная", "микрон", "мкм"},
+    "затирка": {"затирка", "затирочная", "ce40", "се40"},
+    "сетка": {"сетка", "стеклосетка", "стеклотканевая", "фасадная"},
+    "рейка": {"рейка", "рейки", "каркас", "норма", "norma", "т24", "t24", "планка"},
+    "гребенка": {"гребенка", "bts", "bt", "вт"},
+    "подвес": {"подвес", "подвесов", "нониус", "европодвес"},
+    "соединитель": {"соединитель", "соед", "элем", "элемент"},
+    "герметик": {"герметик", "силикон", "силиконовый"},
+    "плитка": {"плитка", "керамогранит", "керамическая"},
+    "краска": {"краска", "окраска", "акриловая"},
+    "штукатурка": {"штукатурка", "штукатурки", "декоративная", "камешковая"},
+    "водосток": {"водосток", "водосточная", "сток", "слив", "колено", "труба", "муфта", "хомут"},
+    "osb": {"osb", "осп", "osb3", "osb-3"},
+}
+
+SYNONYM_BY_TOKEN = {
+    token: canonical
+    for canonical, variants in SYNONYM_GROUPS.items()
+    for token in variants
 }
 
 KNOWN_BRANDS = {
@@ -140,6 +186,7 @@ STATUS_LABELS = {
     "review": "на проверку",
     "unmatched": "не сопоставлено",
     "manual": "подтверждено на проверке",
+    "service": "служебная строка",
 }
 
 
@@ -214,11 +261,108 @@ def normalize(text: str) -> str:
 
 @lru_cache(maxsize=40000)
 def tokens(text: str) -> frozenset[str]:
-    return frozenset(
+    base_tokens = {
         token
         for token in normalize(text).split()
         if len(token) > 1 and token not in STOP_WORDS
-    )
+    }
+    expanded = set(base_tokens)
+    for token in base_tokens:
+        canonical = SYNONYM_BY_TOKEN.get(token)
+        if canonical:
+            expanded.add(canonical)
+    return frozenset(expanded)
+
+
+@lru_cache(maxsize=40000)
+def is_service_text(text: str) -> bool:
+    text_tokens = tokens(text)
+    normalized = normalize(text)
+    if text_tokens & SERVICE_WORDS:
+        return True
+    return any(marker in normalized for marker in ["доставка", "транспортные услуги", "транспортная услуга"])
+
+
+def is_service_item(item: SupplierItem) -> bool:
+    return is_service_text(item.name)
+
+
+@lru_cache(maxsize=40000)
+def item_categories(text: str) -> frozenset[str]:
+    return frozenset(SYNONYM_BY_TOKEN[token] for token in tokens(text) if token in SYNONYM_BY_TOKEN)
+
+
+def normalized_unit(unit: str) -> str:
+    raw = clean_text(unit).lower().replace("²", "2").replace("^2", "2")
+    raw = raw.replace(" ", "").replace(".", "")
+    if raw in {"м2", "квм", "квм2"}:
+        return "m2"
+    if raw in {"м", "мп", "пм"}:
+        return "m"
+    if raw in {"шт", "штук"}:
+        return "pcs"
+    if raw in {"лист", "листы"}:
+        return "sheet"
+    if raw in {"рул", "рулон", "рулоны"}:
+        return "roll"
+    if raw in {"уп", "упак", "упаковка"}:
+        return "pack"
+    if raw in {"кг"}:
+        return "kg"
+    unit_norm = normalize(unit)
+    if unit_norm in {"м2", "м.2", "кв.м", "кв", "м²"}:
+        return "m2"
+    if unit_norm in {"м", "м.п", "п.м", "мп"}:
+        return "m"
+    if unit_norm in {"шт", "штук"}:
+        return "pcs"
+    if unit_norm in {"лист", "листы"}:
+        return "sheet"
+    if unit_norm in {"рул", "рулон", "рулоны"}:
+        return "roll"
+    if unit_norm in {"уп", "упак", "упаковка"}:
+        return "pack"
+    if unit_norm in {"кг"}:
+        return "kg"
+    return unit_norm
+
+
+@lru_cache(maxsize=40000)
+def area_m2_from_text(text: str) -> float | None:
+    normalized = normalize(text)
+    area_patterns = [
+        r"(?:s|площадь)\s*=?\s*(\d+(?:\.\d+)?)\s*(?:м2|м²|кв\.?м)",
+        r"(\d+(?:\.\d+)?)\s*(?:м2|м²|кв\.?м)",
+    ]
+    for pattern in area_patterns:
+        match = re.search(pattern, normalized)
+        if match:
+            value = parse_number(match.group(1))
+            if value:
+                return value
+    dim = re.search(r"(\d{3,4})\s*х\s*(\d{3,4})", normalized)
+    if dim:
+        first = parse_number(dim.group(1))
+        second = parse_number(dim.group(2))
+        if first and second:
+            return round(first * second / 1_000_000, 4)
+    return None
+
+
+def quantities_compatible(request: RequestItem, offer: SupplierItem) -> bool:
+    if request.qty is None or offer.qty is None:
+        return False
+    req_unit = normalized_unit(request.unit)
+    offer_unit = normalized_unit(offer.unit)
+    if req_unit == offer_unit:
+        return abs(request.qty - offer.qty) <= max(0.01, request.qty * 0.02)
+    req_area = area_m2_from_text(request.name)
+    offer_area = area_m2_from_text(offer.name)
+    if req_unit == "m2" and offer_unit in {"sheet", "roll", "pack", "pcs"} and offer_area:
+        return abs(request.qty - offer.qty * offer_area) <= max(0.05, request.qty * 0.12)
+    if offer_unit == "m2" and req_unit in {"sheet", "roll", "pack", "pcs"} and req_area:
+        return abs(request.qty * req_area - offer.qty) <= max(0.05, offer.qty * 0.12)
+    return False
 
 
 @lru_cache(maxsize=40000)
@@ -250,12 +394,17 @@ def match_score(request_name: str, supplier_name: str) -> tuple[float, str]:
     sup_nums = numeric_tokens(supplier_name)
     num_union = req_nums | sup_nums
     num_score = len(req_nums & sup_nums) / len(num_union) if num_union else 0.4
+    req_categories = item_categories(request_name)
+    sup_categories = item_categories(supplier_name)
+    category_overlap = bool(req_categories & sup_categories)
 
     req_brands = brands(request_name)
     sup_brands = brands(supplier_name)
     brand_conflict = bool(req_brands and sup_brands and req_brands.isdisjoint(sup_brands))
 
     score = 0.42 * seq + 0.43 * jaccard + 0.15 * num_score
+    if category_overlap:
+        score += 0.14
     if brand_conflict:
         score -= 0.22
 
@@ -609,8 +758,10 @@ def call_deepseek(payload: dict) -> dict | None:
                     {
                         "task": (
                             "Для каждой строки offer_positions выбери pos из request_positions или null. "
+                            "Если точного совпадения нет, но есть 2-5 вероятных вариантов, верни лучший request_pos и добавь alternatives. "
                             "Верни JSON: {\"matches\":[{\"offer_id\": число, \"request_pos\": строка или null, "
-                            "\"confidence\": число от 0 до 1, \"reason\": коротко}]}"
+                            "\"confidence\": число от 0 до 1, \"reason\": коротко, "
+                            "\"alternatives\":[{\"request_pos\": строка, \"confidence\": число, \"reason\": коротко}]}]}"
                         ),
                         **payload,
                     },
@@ -672,18 +823,19 @@ def improve_matches_with_deepseek(
             "specs": item.specs,
             "unit": item.unit,
             "qty": item.qty,
+            "area_m2_hint": area_m2_from_text(item.name),
         }
         for item in request_items
     ]
     by_pos = {item.pos: item for item in request_items}
     ai_scope = os.environ.get("DEEPSEEK_AI_SCOPE", "all").strip().lower()
     if ai_scope == "all":
-        need_ai = list(enumerate(matches))
+        need_ai = [(idx, match) for idx, match in enumerate(matches) if match.status != "service"]
     else:
         need_ai = [
             (idx, match)
             for idx, match in enumerate(matches)
-            if match.status == "review" or not match.request_pos
+            if match.status != "service" and (match.status == "review" or not match.request_pos)
         ]
     max_rows = int(os.environ.get("DEEPSEEK_MAX_AI_ROWS", "300"))
     batch_size = int(os.environ.get("DEEPSEEK_BATCH_SIZE", "20"))
@@ -704,6 +856,7 @@ def improve_matches_with_deepseek(
                 "name": match.supplier_item.name,
                 "unit": match.supplier_item.unit,
                 "qty": match.supplier_item.qty,
+                "area_m2_hint": area_m2_from_text(match.supplier_item.name),
                 "price": match.supplier_item.price,
                 "current_request_pos": match.request_pos,
                 "current_score": round(match.score, 3),
@@ -724,11 +877,30 @@ def improve_matches_with_deepseek(
             if offer_id < 0 or offer_id >= len(updated):
                 continue
             request_pos = clean_text(item.get("request_pos"))
-            confidence = float(item.get("confidence") or 0)
-            if not request_pos or request_pos not in by_pos or confidence < 0.55:
+            confidence = parse_number(item.get("confidence")) or 0
+            if confidence > 1:
+                confidence /= 100
+            alternatives = []
+            for alt in item.get("alternatives") or []:
+                alt_pos = clean_text(alt.get("request_pos"))
+                alt_confidence = parse_number(alt.get("confidence")) or 0
+                if alt_confidence > 1:
+                    alt_confidence /= 100
+                alt_reason = clean_text(alt.get("reason") or "")
+                if alt_pos in by_pos:
+                    alternatives.append((alt_pos, alt_confidence, alt_reason))
+            alternatives = sorted(alternatives, key=lambda alt: alt[1], reverse=True)[:5]
+            if (not request_pos or request_pos not in by_pos) and alternatives:
+                request_pos, confidence, _ = alternatives[0]
+            if not request_pos or request_pos not in by_pos or confidence < 0.38:
                 continue
             old = updated[offer_id]
             reason = clean_text(item.get("reason") or "")
+            alt_text = "; ".join(
+                f"{pos} ({round(conf * 100)}%)" for pos, conf, _ in alternatives if pos != request_pos
+            )
+            if alt_text:
+                reason = clean_text(f"{reason}. Другие варианты: {alt_text}")
             if confidence >= 0.72:
                 updated[offer_id] = Match(old.supplier_item, request_pos, confidence, "auto", "")
             else:
@@ -759,6 +931,9 @@ def build_matches(
             num_index.setdefault(number, set()).add(idx)
 
     for offer in supplier_items:
+        if is_service_item(offer):
+            matches.append(Match(offer, None, 0, "service", "служебная строка: не участвует в проценте сопоставления"))
+            continue
         best_item = None
         best_score = 0.0
         best_reason = ""
@@ -772,6 +947,11 @@ def build_matches(
         if best_item and best_score >= 0.36:
             status = "auto" if best_score >= 0.62 and not best_reason else "review"
             matches.append(Match(offer, best_item.pos, best_score, status, best_reason))
+        elif best_item and (
+            best_score >= 0.26
+            or (best_score >= 0.20 and not item_categories(best_item.name).isdisjoint(item_categories(offer.name)))
+        ):
+            matches.append(Match(offer, best_item.pos, best_score, "review", best_reason or "возможное совпадение, требуется проверка"))
         else:
             matches.append(Match(offer, None, best_score, "unmatched", "не найдено надежное совпадение"))
     return improve_matches_with_deepseek(request_items, matches, progress_callback)
@@ -892,9 +1072,12 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     suppliers = sorted({m.supplier_item.supplier for m in matches})
     by_request_supplier: dict[tuple[str, str], list[Match]] = {}
     unmatched: list[SupplierItem] = []
+    service_items: list[SupplierItem] = []
     for match in matches:
         if match.request_pos:
             by_request_supplier.setdefault((match.request_pos, match.supplier_item.supplier), []).append(match)
+        elif match.status == "service":
+            service_items.append(match.supplier_item)
         else:
             unmatched.append(match.supplier_item)
 
@@ -1017,7 +1200,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.cell(value_row, start + 2, f"{offer_qty} {offer.unit}".strip())
             ws.cell(value_row, start + 3, offer.total)
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
-            qty_ok = request.qty is not None and offer.qty is not None and abs(request.qty - offer.qty) <= max(0.01, request.qty * 0.02)
+            qty_ok = quantities_compatible(request, offer)
             if offer.price is not None and min_price is not None and abs(offer.price - min_price) < 0.0001:
                 ws.cell(value_row, start + 1).fill = green
             if offer.price is not None and max_price is not None and abs(offer.price - max_price) < 0.0001 and max_price != min_price:
@@ -1079,6 +1262,27 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         extra.freeze_panes = "A2"
         for col_letter in ("F", "G"):
             for cell in extra[col_letter][1:]:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0.00 ₽'
+
+    if service_items:
+        service = wb.create_sheet("Служебные строки")
+        headers = ["Поставщик", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
+        service.append(headers)
+        for offer in service_items:
+            service.append([offer.supplier, offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
+        style_sheet(service)
+        service.column_dimensions["A"].width = 20
+        service.column_dimensions["B"].width = 10
+        service.column_dimensions["C"].width = 70
+        service.column_dimensions["D"].width = 12
+        service.column_dimensions["E"].width = 10
+        service.column_dimensions["F"].width = 14
+        service.column_dimensions["G"].width = 14
+        service.column_dimensions["H"].width = 24
+        service.freeze_panes = "A2"
+        for col_letter in ("F", "G"):
+            for cell in service[col_letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
 

@@ -24,6 +24,7 @@ from compare_tz_kp import (
     build_matches,
     clean_text,
     get_ai_warnings,
+    match_score,
     read_offer,
     read_request_xlsx,
     status_label,
@@ -181,6 +182,26 @@ input[type="search"] { font: inherit; }
   margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.suggestion {
+  border: 1px solid #d9e0ea;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #344054;
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.suggestion:hover {
+  border-color: #9fb3c8;
+  background: #eef4fa;
 }
 .with-tooltip {
   cursor: help;
@@ -474,6 +495,7 @@ td.small, th.small { width: 118px; }
 .status.unmatched { background: #fdeaea; border-color: #f2b9b7; color: #8a2420; }
 .status.auto { background: #e8f6ec; border-color: #bfe5c8; color: #236336; }
 .status.manual { background: #eef4fa; border-color: #cbdcea; color: #244f73; }
+.status.service { background: #f0f2f4; border-color: #d9e0ea; color: #667085; }
 .muted { color: var(--muted); }
 .danger { background: var(--red); }
 .empty {
@@ -793,6 +815,16 @@ def page(title: str, body: str) -> bytes:
       input.addEventListener('input', () => updateMatchTitle(input));
       input.addEventListener('change', () => updateMatchTitle(input));
     }});
+    document.querySelectorAll('[data-suggest]').forEach((button) => {{
+      button.addEventListener('click', () => {{
+        const cell = button.closest('td');
+        const input = cell?.querySelector('.match-input');
+        if (!input) return;
+        input.value = button.dataset.suggest || '';
+        updateMatchTitle(input);
+        input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+      }});
+    }});
     if (reviewSearch && reviewRows.length) {{
       const rowText = (row) => (row.textContent + ' ' + (row.querySelector('input')?.value || '')).toLowerCase();
       const updateReviewSearch = () => {{
@@ -966,15 +998,30 @@ def load_state(run_dir: Path) -> tuple[list[RequestItem], list[Match], list[str]
 
 
 def stats_for(request_items: list[RequestItem], matches: list[Match]) -> dict[str, int]:
-    matched = sum(1 for match in matches if match.request_pos)
+    comparable = [match for match in matches if match.status != "service"]
+    matched = sum(1 for match in comparable if match.request_pos)
     return {
         "request": len(request_items),
         "offers": len(matches),
-        "auto": sum(1 for match in matches if match.status == "auto" and match.request_pos),
-        "review": sum(1 for match in matches if match.status == "review" and match.request_pos),
-        "unmatched": sum(1 for match in matches if not match.request_pos),
+        "comparable": len(comparable),
+        "service": sum(1 for match in matches if match.status == "service"),
+        "auto": sum(1 for match in comparable if match.status == "auto" and match.request_pos),
+        "review": sum(1 for match in comparable if match.status == "review" and match.request_pos),
+        "unmatched": sum(1 for match in comparable if not match.request_pos),
         "matched": matched,
     }
+
+
+def top_request_suggestions(match: Match, request_items: list[RequestItem], limit: int = 5) -> list[tuple[RequestItem, float]]:
+    suggestions: list[tuple[RequestItem, float]] = []
+    for item in request_items:
+        score, _reason = match_score(item.name, match.supplier_item.name)
+        if item.pos == match.request_pos:
+            score = max(score, match.score)
+        if score >= 0.16 or item.pos == match.request_pos:
+            suggestions.append((item, score))
+    suggestions.sort(key=lambda pair: pair[1], reverse=True)
+    return suggestions[:limit]
 
 
 def resolve_request_pos(raw_value: str, request_items: list[RequestItem]) -> str | None:
@@ -1071,11 +1118,11 @@ def render_review(run_id: str) -> bytes:
     run_dir = RUNS_DIR / run_id
     request_items, matches, errors = load_state(run_dir)
     stats = stats_for(request_items, matches)
-    match_percent = round((stats["matched"] / stats["offers"]) * 100, 1) if stats["offers"] else 0
+    match_percent = round((stats["matched"] / stats["comparable"]) * 100, 1) if stats["comparable"] else 0
     review_rows = [
         (idx, match)
         for idx, match in enumerate(matches)
-        if match.status != "auto" or not match.request_pos or match.reason
+        if match.status != "service" and (match.status != "auto" or not match.request_pos or match.reason)
     ]
     request_options = "\n".join(
         f'<option value="{esc(item.pos)} - {esc(item.name[:110])}" data-full="{esc(item.pos)} - {esc(item.name)}"></option>'
@@ -1087,11 +1134,24 @@ def render_review(run_id: str) -> bytes:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
         selected_value = f"{selected_item.pos} - {selected_item.name[:110]}" if selected_item else ""
         selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
+        suggestion_buttons = ""
+        suggestions = top_request_suggestions(match, request_items)
+        if suggestions:
+            suggestion_buttons = '<div class="suggestions" aria-label="Варианты сопоставления">'
+            for suggestion, score in suggestions:
+                value = f"{suggestion.pos} - {suggestion.name[:110]}"
+                full = f"{suggestion.pos} - {suggestion.name}"
+                suggestion_buttons += (
+                    f'<button class="suggestion" type="button" data-suggest="{esc(value)}" '
+                    f'title="{esc(full)}">{esc(suggestion.pos)} · {round(score * 100)}%</button>'
+                )
+            suggestion_buttons += "</div>"
         match_input = f"""
 <input class="match-input with-tooltip" type="text" name="match_{idx}" list="request-options" value="{esc(selected_value)}" title="{esc(selected_title)}" placeholder="Начните вводить название или номер позиции">
-<div class="match-help">Оставьте пустым, если позицию КП не нужно сопоставлять.</div>"""
+<div class="match-help">Оставьте пустым, если позицию КП не нужно сопоставлять.</div>
+{suggestion_buttons}"""
         status_class = "unmatched" if not match.request_pos else match.status
-        if status_class not in {"auto", "review", "unmatched", "manual"}:
+        if status_class not in {"auto", "review", "unmatched", "manual", "service"}:
             status_class = "review"
         rows_html += f"""
 <tr data-review-row>
@@ -1176,9 +1236,11 @@ def render_review(run_id: str) -> bytes:
 <div class="review-summary" aria-label="Краткая сводка обработки">
   <div class="summary-item"><span>Заявка</span><b>{stats["request"]}</b></div>
   <div class="summary-item"><span>КП</span><b>{stats["offers"]}</b></div>
+  <div class="summary-item"><span>Товарные</span><b>{stats["comparable"]}</b></div>
   <div class="summary-item"><span>Сопоставлено</span><b>{match_percent}%</b></div>
   <div class="summary-item"><span>Авто</span><b>{stats["auto"]}</b></div>
   <div class="summary-item attention"><span>К проверке</span><b>{stats["review"] + stats["unmatched"]}</b></div>
+  <div class="summary-item"><span>Служебные</span><b>{stats["service"]}</b></div>
 </div>
 {review_html}
 """
@@ -1395,8 +1457,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 write_review(run_dir / "review.xlsx", updated, request_items)
                 write_final(run_dir / "summary.xlsx", request_items, updated)
                 save_state(run_dir, request_items, updated, clean_errors)
-                total = len(updated)
-                matched = sum(1 for match in updated if match.request_pos)
+                comparable = [match for match in updated if match.status != "service"]
+                total = len(comparable)
+                matched = sum(1 for match in comparable if match.request_pos)
                 percent = round((matched / total) * 100, 1) if total else 0
                 set_ai_job(
                     run_id,

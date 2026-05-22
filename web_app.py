@@ -341,20 +341,33 @@ input[type="search"] { font: inherit; }
   display: inline-flex;
 }
 .btn.stop:hover { background: #fff0f0; }
-.stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+.review-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 14px;
 }
-.stat {
+.summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 32px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 12px;
-  background: #fbfcfe;
+  border-radius: 999px;
+  background: #fff;
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 13px;
 }
-.stat b {
-  display: block;
-  font-size: 22px;
+.summary-item b {
+  color: var(--text);
+  font-size: 16px;
+}
+.summary-item.attention {
+  border-color: #f1d88d;
+  background: #fff9e8;
+  color: #6f5200;
 }
 .notice {
   border-radius: 6px;
@@ -499,7 +512,8 @@ td.small, th.small { width: 118px; }
   .panel { padding: 14px; }
   .product-intro { padding: 14px; }
   .intro-points { display: flex; }
-  .stats { grid-template-columns: 1fr; margin-top: 14px; }
+  .review-summary { align-items: stretch; }
+  .summary-item { flex: 1 1 145px; justify-content: center; border-radius: 8px; }
   .review-tools { grid-template-columns: 1fr; }
   .review-count { padding-bottom: 0; }
   h1 { font-size: 21px; }
@@ -996,14 +1010,12 @@ def render_review(run_id: str) -> bytes:
   </div>
 </div>
 {warning_html}
-<section class="panel" style="margin-bottom:16px">
-  <div class="stats">
-    <div class="stat"><b>{stats["request"]}</b><span>позиций заявки</span></div>
-    <div class="stat"><b>{stats["offers"]}</b><span>строк КП</span></div>
-    <div class="stat"><b>{stats["auto"]}</b><span>автоматически</span></div>
-    <div class="stat"><b>{stats["review"] + stats["unmatched"]}</b><span>требуют внимания</span></div>
-  </div>
-</section>
+<div class="review-summary" aria-label="Краткая сводка обработки">
+  <div class="summary-item"><span>Заявка</span><b>{stats["request"]}</b></div>
+  <div class="summary-item"><span>КП</span><b>{stats["offers"]}</b></div>
+  <div class="summary-item"><span>Авто</span><b>{stats["auto"]}</b></div>
+  <div class="summary-item attention"><span>К проверке</span><b>{stats["review"] + stats["unmatched"]}</b></div>
+</div>
 {review_html}
 """
     return page("Проверка совпадений", body)

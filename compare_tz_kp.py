@@ -1064,6 +1064,14 @@ def delivery_mark(delivery: str) -> str:
     return text
 
 
+def offer_total_value(offer: SupplierItem) -> float | None:
+    if offer.total is not None:
+        return offer.total
+    if offer.price is not None and offer.qty is not None:
+        return offer.price * offer.qty
+    return offer.price
+
+
 def write_final(path: Path, request_items: list[RequestItem], matches: list[Match]) -> None:
     wb = Workbook()
     ws = wb.active
@@ -1073,11 +1081,13 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     by_request_supplier: dict[tuple[str, str], list[Match]] = {}
     unmatched: list[SupplierItem] = []
     service_items: list[SupplierItem] = []
+    service_by_supplier: dict[str, list[SupplierItem]] = {}
     for match in matches:
         if match.request_pos:
             by_request_supplier.setdefault((match.request_pos, match.supplier_item.supplier), []).append(match)
         elif match.status == "service":
             service_items.append(match.supplier_item)
+            service_by_supplier.setdefault(match.supplier_item.supplier, []).append(match.supplier_item)
         else:
             unmatched.append(match.supplier_item)
 
@@ -1141,6 +1151,8 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     ws.row_dimensions[1].height = 42
     ws.row_dimensions[2].height = 42
     row = 3
+    supplier_goods_totals = {supplier: 0.0 for supplier in suppliers}
+    supplier_service_totals = {supplier: sum(offer_total_value(offer) or 0 for offer in service_by_supplier.get(supplier, [])) for supplier in suppliers}
     for request in request_items:
         desc_row = row
         label_row = row + 1
@@ -1172,6 +1184,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 selected[supplier] = chosen
                 if chosen.supplier_item.price is not None:
                     prices.append((supplier, chosen.supplier_item.price))
+                supplier_goods_totals[supplier] += offer_total_value(chosen.supplier_item) or 0
 
         min_price = min((price for _, price in prices), default=None)
         max_price = max((price for _, price in prices), default=None)
@@ -1218,6 +1231,82 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         ws.row_dimensions[label_row].height = 21
         ws.row_dimensions[value_row].height = 25
         row += 3
+
+    for service_index, offer in enumerate(service_items, start=1):
+        desc_row = row
+        label_row = row + 1
+        value_row = row + 2
+
+        ws.cell(label_row, 1, "позиция\nв заявке")
+        ws.cell(value_row, 1, f"Д{service_index}")
+        ws.merge_cells(start_row=desc_row, start_column=2, end_row=value_row, end_column=2)
+        ws.cell(desc_row, 2, offer.name)
+        ws.merge_cells(start_row=desc_row, start_column=3, end_row=value_row, end_column=3)
+        service_qty = fmt_qty(offer.qty)
+        ws.cell(desc_row, 3, f"{service_qty} {offer.unit}".strip())
+        style_range(desc_row, value_row, 1, 3, white)
+        ws.cell(label_row, 1).font = Font(size=7)
+        ws.cell(value_row, 1).font = Font(size=10)
+        ws.cell(desc_row, 2).font = Font(bold=True, color="7A3416")
+        ws.cell(desc_row, 2).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.cell(desc_row, 3).font = Font(bold=True)
+
+        for supplier in suppliers:
+            start = supplier_start_cols[supplier]
+            style_range(desc_row, value_row, start, start + 4, supplier_light_by_name[supplier])
+            if supplier != offer.supplier:
+                ws.merge_cells(start_row=desc_row, start_column=start, end_row=value_row, end_column=start + 4)
+                cell = ws.cell(desc_row, start, "")
+                cell.fill = gray
+                continue
+
+            subheaders = ["позиция\nв счете", "цена", "кол-во", "стоимость", "срок"]
+            for offset, header in enumerate(subheaders):
+                ws.cell(label_row, start + offset, header)
+                ws.cell(label_row, start + offset).font = Font(bold=True, size=9)
+            ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + 4)
+            ws.cell(desc_row, start, offer.name)
+            ws.cell(value_row, start, offer.row_no)
+            ws.cell(value_row, start + 1, offer.price)
+            ws.cell(value_row, start + 2, f"{service_qty} {offer.unit}".strip())
+            ws.cell(value_row, start + 3, offer_total_value(offer))
+            ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
+            ws.cell(desc_row, start).fill = yellow
+            ws.cell(value_row, start + 3).fill = yellow
+
+        ws.row_dimensions[desc_row].height = 28
+        ws.row_dimensions[label_row].height = 21
+        ws.row_dimensions[value_row].height = 25
+        row += 3
+
+    total_rows = [
+        ("Итого по товарам", supplier_goods_totals),
+        ("Доставка/услуги", supplier_service_totals),
+        (
+            "Итого с доставкой",
+            {supplier: supplier_goods_totals[supplier] + supplier_service_totals[supplier] for supplier in suppliers},
+        ),
+    ]
+    for label, totals in total_rows:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        ws.cell(row, 1, label)
+        ws.cell(row, 1).font = Font(bold=True, color="1F2933")
+        ws.cell(row, 1).fill = left_header
+        style_range(row, row, 1, 3, left_header)
+        for supplier in suppliers:
+            start = supplier_start_cols[supplier]
+            style_range(row, row, start, start + 4, supplier_light_by_name[supplier])
+            ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=start + 2)
+            ws.cell(row, start, label)
+            ws.cell(row, start).font = Font(bold=True)
+            ws.cell(row, start + 3, totals.get(supplier, 0))
+            ws.cell(row, start + 3).font = Font(bold=True)
+            ws.cell(row, start + 3).number_format = '#,##0.00 ₽'
+            if label == "Итого с доставкой":
+                ws.cell(row, start).fill = green
+                ws.cell(row, start + 3).fill = green
+        ws.row_dimensions[row].height = 24
+        row += 1
 
     for sheet_row in ws.iter_rows():
         for cell in sheet_row:

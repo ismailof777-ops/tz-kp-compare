@@ -839,12 +839,14 @@ def load_state(run_dir: Path) -> tuple[list[RequestItem], list[Match], list[str]
 
 
 def stats_for(request_items: list[RequestItem], matches: list[Match]) -> dict[str, int]:
+    matched = sum(1 for match in matches if match.request_pos)
     return {
         "request": len(request_items),
         "offers": len(matches),
         "auto": sum(1 for match in matches if match.status == "auto" and match.request_pos),
         "review": sum(1 for match in matches if match.status == "review" and match.request_pos),
         "unmatched": sum(1 for match in matches if not match.request_pos),
+        "matched": matched,
     }
 
 
@@ -942,6 +944,7 @@ def render_review(run_id: str) -> bytes:
     run_dir = RUNS_DIR / run_id
     request_items, matches, errors = load_state(run_dir)
     stats = stats_for(request_items, matches)
+    match_percent = round((stats["matched"] / stats["offers"]) * 100, 1) if stats["offers"] else 0
     review_rows = [
         (idx, match)
         for idx, match in enumerate(matches)
@@ -1030,6 +1033,7 @@ def render_review(run_id: str) -> bytes:
 <div class="review-summary" aria-label="Краткая сводка обработки">
   <div class="summary-item"><span>Заявка</span><b>{stats["request"]}</b></div>
   <div class="summary-item"><span>КП</span><b>{stats["offers"]}</b></div>
+  <div class="summary-item"><span>Сопоставлено</span><b>{match_percent}%</b></div>
   <div class="summary-item"><span>Авто</span><b>{stats["auto"]}</b></div>
   <div class="summary-item attention"><span>К проверке</span><b>{stats["review"] + stats["unmatched"]}</b></div>
 </div>

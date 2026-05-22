@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass, asdict
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -101,6 +102,7 @@ def status_label(status: str) -> str:
     return STATUS_LABELS.get(status, status)
 
 
+@lru_cache(maxsize=20000)
 def fix_mojibake(text: str) -> str:
     if not text or not re.search(r"(Р[°-џ]|\u0098|вЂ)", text):
         return text
@@ -123,6 +125,7 @@ def fix_mojibake(text: str) -> str:
     return text
 
 
+@lru_cache(maxsize=40000)
 def clean_text(value) -> str:
     if value is None:
         return ""
@@ -155,6 +158,7 @@ def money_to_float(text: str) -> float | None:
     return parse_number(text)
 
 
+@lru_cache(maxsize=40000)
 def normalize(text: str) -> str:
     text = clean_text(text).lower().replace("ё", "е")
     text = text.replace("x", "х").replace("*", "х")
@@ -163,25 +167,28 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def tokens(text: str) -> set[str]:
-    return {
+@lru_cache(maxsize=40000)
+def tokens(text: str) -> frozenset[str]:
+    return frozenset(
         token
         for token in normalize(text).split()
         if len(token) > 1 and token not in STOP_WORDS
-    }
+    )
 
 
-def numeric_tokens(text: str) -> set[str]:
-    return {m.group(0).replace(",", ".") for m in re.finditer(r"\d+(?:[,.]\d+)?", text)}
+@lru_cache(maxsize=40000)
+def numeric_tokens(text: str) -> frozenset[str]:
+    return frozenset(m.group(0).replace(",", ".") for m in re.finditer(r"\d+(?:[,.]\d+)?", text))
 
 
-def brands(text: str) -> set[str]:
+@lru_cache(maxsize=40000)
+def brands(text: str) -> frozenset[str]:
     source = normalize(text)
     found = set()
     for raw, canonical in KNOWN_BRANDS.items():
         if raw in source:
             found.add(canonical)
-    return found
+    return frozenset(found)
 
 
 def match_score(request_name: str, supplier_name: str) -> tuple[float, str]:
@@ -257,7 +264,7 @@ def find_column_preferred(
 
 
 def read_request_xlsx(path: Path) -> list[RequestItem]:
-    wb = load_workbook(path, data_only=True, read_only=True)
+    wb = load_workbook(path, data_only=True)
     ws = wb.active
     found = find_header_row(ws, ["описание", "количество"])
     if not found:
@@ -314,7 +321,7 @@ def supplier_name_from_file(path: Path) -> str:
 
 
 def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[SupplierItem]:
-    wb = load_workbook(path, data_only=True, read_only=True)
+    wb = load_workbook(path, data_only=True)
     supplier = supplier or supplier_name_from_file(path)
     items: list[SupplierItem] = []
 
@@ -505,13 +512,49 @@ def read_offer(path: Path, supplier: str | None = None) -> list[SupplierItem]:
     raise ValueError(f"{path.name}: неподдержанный формат КП")
 
 
+def candidate_request_indexes(offer: SupplierItem, request_items: list[RequestItem], token_index: dict[str, set[int]], num_index: dict[str, set[int]]) -> set[int]:
+    offer_tokens = tokens(offer.name)
+    offer_nums = numeric_tokens(offer.name)
+    candidates: set[int] = set()
+    for token in offer_tokens:
+        candidates.update(token_index.get(token, set()))
+    for number in offer_nums:
+        candidates.update(num_index.get(number, set()))
+
+    if not candidates:
+        return set(range(len(request_items)))
+
+    req_brands_by_index = {idx: brands(request_items[idx].name) for idx in candidates}
+    offer_brands = brands(offer.name)
+    if offer_brands:
+        brand_matches = {idx for idx, req_brands in req_brands_by_index.items() if req_brands and not req_brands.isdisjoint(offer_brands)}
+        if brand_matches:
+            candidates = brand_matches
+
+    if len(candidates) < 6:
+        number_matches = set()
+        for number in offer_nums:
+            number_matches.update(num_index.get(number, set()))
+        candidates.update(number_matches)
+    return candidates or set(range(len(request_items)))
+
+
 def build_matches(request_items: list[RequestItem], supplier_items: list[SupplierItem]) -> list[Match]:
     matches: list[Match] = []
+    token_index: dict[str, set[int]] = {}
+    num_index: dict[str, set[int]] = {}
+    for idx, request in enumerate(request_items):
+        for token in tokens(request.name):
+            token_index.setdefault(token, set()).add(idx)
+        for number in numeric_tokens(request.name):
+            num_index.setdefault(number, set()).add(idx)
+
     for offer in supplier_items:
         best_item = None
         best_score = 0.0
         best_reason = ""
-        for request in request_items:
+        for idx in candidate_request_indexes(offer, request_items, token_index, num_index):
+            request = request_items[idx]
             score, reason = match_score(request.name, offer.name)
             if score > best_score:
                 best_score = score

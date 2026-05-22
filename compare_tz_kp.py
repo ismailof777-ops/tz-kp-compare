@@ -10,7 +10,7 @@ from dataclasses import dataclass, asdict
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -654,7 +654,14 @@ def call_deepseek(payload: dict) -> dict | None:
         return None
 
 
-def improve_matches_with_deepseek(request_items: list[RequestItem], matches: list[Match]) -> list[Match]:
+ProgressCallback = Callable[[int, int, str], None]
+
+
+def improve_matches_with_deepseek(
+    request_items: list[RequestItem],
+    matches: list[Match],
+    progress_callback: ProgressCallback | None = None,
+) -> list[Match]:
     if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
         return matches
 
@@ -681,10 +688,13 @@ def improve_matches_with_deepseek(request_items: list[RequestItem], matches: lis
     max_rows = int(os.environ.get("DEEPSEEK_MAX_AI_ROWS", "300"))
     batch_size = int(os.environ.get("DEEPSEEK_BATCH_SIZE", "20"))
     updated = list(matches)
+    total_to_check = min(len(need_ai), max_rows)
+    if progress_callback:
+        progress_callback(0, total_to_check, "ИИ готовит позиции к проверке")
     if len(need_ai) > max_rows:
         record_ai_warning(f"DeepSeek проверил только первые {max_rows} строк КП из {len(need_ai)} по текущему лимиту.")
 
-    for start in range(0, min(len(need_ai), max_rows), batch_size):
+    for start in range(0, total_to_check, batch_size):
         batch = need_ai[start : start + batch_size]
         offer_payload = [
             {
@@ -701,6 +711,9 @@ def improve_matches_with_deepseek(request_items: list[RequestItem], matches: lis
             for idx, match in batch
         ]
         result = call_deepseek({"request_positions": request_payload, "offer_positions": offer_payload})
+        done_count = min(start + len(batch), total_to_check)
+        if progress_callback:
+            progress_callback(done_count, total_to_check, f"ИИ проверил {done_count} из {total_to_check} строк КП")
         if not result:
             continue
         for item in result.get("matches", []):
@@ -729,7 +742,11 @@ def improve_matches_with_deepseek(request_items: list[RequestItem], matches: lis
     return updated
 
 
-def build_matches(request_items: list[RequestItem], supplier_items: list[SupplierItem]) -> list[Match]:
+def build_matches(
+    request_items: list[RequestItem],
+    supplier_items: list[SupplierItem],
+    progress_callback: ProgressCallback | None = None,
+) -> list[Match]:
     clear_ai_warnings()
     load_env_file()
     matches: list[Match] = []
@@ -757,7 +774,7 @@ def build_matches(request_items: list[RequestItem], supplier_items: list[Supplie
             matches.append(Match(offer, best_item.pos, best_score, status, best_reason))
         else:
             matches.append(Match(offer, None, best_score, "unmatched", "не найдено надежное совпадение"))
-    return improve_matches_with_deepseek(request_items, matches)
+    return improve_matches_with_deepseek(request_items, matches, progress_callback)
 
 
 def write_review(path: Path, matches: list[Match], request_items: list[RequestItem]) -> None:

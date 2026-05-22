@@ -9,6 +9,7 @@ import mimetypes
 import os
 import shutil
 import sys
+import threading
 import uuid
 from dataclasses import asdict
 from http import HTTPStatus
@@ -34,6 +35,8 @@ from compare_tz_kp import (
 ROOT = Path(__file__).resolve().parent
 RUNS_DIR = ROOT / "outputs" / "runs"
 MAX_UPLOAD_SIZE = 80 * 1024 * 1024
+AI_JOBS: dict[str, dict[str, object]] = {}
+AI_JOBS_LOCK = threading.Lock()
 
 
 class UploadedFile:
@@ -511,6 +514,42 @@ td.small, th.small { width: 118px; }
   background: var(--accent);
   animation: progress-slide 1.1s ease-in-out infinite;
 }
+.ai-progress {
+  display: none;
+  width: min(520px, 100%);
+  margin-top: 12px;
+  border: 1px solid #b8d6e2;
+  border-radius: 8px;
+  background: #f1fbff;
+  padding: 12px;
+}
+.ai-progress.is-visible { display: block; }
+.ai-progress-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ai-progress-track {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: #d5e8ef;
+}
+.ai-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .25s ease;
+}
+.ai-progress-message {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
 @keyframes progress-slide {
   0% { transform: translateX(-120%); }
   50% { transform: translateX(80%); }
@@ -535,6 +574,39 @@ td.small, th.small { width: 118px; }
 
 def esc(value) -> str:
     return html.escape("" if value is None else str(value), quote=True)
+
+
+def set_ai_job(run_id: str, **updates: object) -> None:
+    with AI_JOBS_LOCK:
+        current = AI_JOBS.setdefault(
+            run_id,
+            {
+                "state": "idle",
+                "current": 0,
+                "total": 0,
+                "percent": 0,
+                "message": "",
+                "redirect": f"/review/{run_id}",
+            },
+        )
+        current.update(updates)
+
+
+def get_ai_job(run_id: str) -> dict[str, object]:
+    with AI_JOBS_LOCK:
+        return dict(
+            AI_JOBS.get(
+                run_id,
+                {
+                    "state": "idle",
+                    "current": 0,
+                    "total": 0,
+                    "percent": 0,
+                    "message": "ИИ-проверка не запущена",
+                    "redirect": f"/review/{run_id}",
+                },
+            )
+        )
 
 
 def page(title: str, body: str) -> bytes:
@@ -741,6 +813,61 @@ def page(title: str, body: str) -> bytes:
       reviewRows.forEach((row) => row.querySelector('input')?.addEventListener('change', updateReviewSearch));
       updateReviewSearch();
     }}
+    document.querySelectorAll('[data-ai-rerun]').forEach((form) => {{
+      const button = form.querySelector('[data-ai-button]');
+      const progress = form.querySelector('[data-ai-progress]');
+      const fill = form.querySelector('[data-ai-fill]');
+      const percentNode = form.querySelector('[data-ai-percent]');
+      const messageNode = form.querySelector('[data-ai-message]');
+      const runId = form.dataset.runId;
+      const setProgress = (data) => {{
+        const percent = Math.max(0, Math.min(100, Number(data.percent || 0)));
+        if (progress) progress.classList.add('is-visible');
+        if (fill) fill.style.width = percent + '%';
+        if (percentNode) percentNode.textContent = percent + '%';
+        if (messageNode) messageNode.textContent = data.message || 'ИИ проверяет файл';
+      }};
+      const poll = async () => {{
+        const response = await fetch('/progress/' + encodeURIComponent(runId), {{ cache: 'no-store' }});
+        const data = await response.json();
+        setProgress(data);
+        if (data.state === 'done') {{
+          window.location.href = data.redirect || ('/review/' + runId);
+          return;
+        }}
+        if (data.state === 'error') {{
+          if (button) {{
+            button.disabled = false;
+            button.textContent = 'Перепроверить весь файл через ИИ';
+          }}
+          return;
+        }}
+        window.setTimeout(poll, 1000);
+      }};
+      form.addEventListener('submit', async (event) => {{
+        event.preventDefault();
+        if (button) {{
+          button.disabled = true;
+          button.textContent = 'ИИ проверяет...';
+        }}
+        setProgress({{ percent: 0, message: 'Запускаем ИИ-проверку' }});
+        try {{
+          const response = await fetch(form.action, {{
+            method: 'POST',
+            headers: {{ 'Accept': 'application/json' }},
+          }});
+          const data = await response.json();
+          setProgress(data);
+          poll();
+        }} catch (error) {{
+          setProgress({{ percent: 0, message: 'Не удалось запустить ИИ-проверку' }});
+          if (button) {{
+            button.disabled = false;
+            button.textContent = 'Перепроверить весь файл через ИИ';
+          }}
+        }}
+      }});
+    }});
   </script>
 </body>
 </html>"""
@@ -980,8 +1107,16 @@ def render_review(run_id: str) -> bytes:
 
     if rows_html:
         review_html = f"""
-<form class="actions" action="/rerun-ai/{esc(run_id)}" method="post">
-  <button class="btn secondary" type="submit">Перепроверить весь файл через ИИ</button>
+<form class="actions ai-rerun-form" action="/rerun-ai/{esc(run_id)}" method="post" data-ai-rerun data-run-id="{esc(run_id)}">
+  <button class="btn secondary" type="submit" data-ai-button>Перепроверить весь файл через ИИ</button>
+  <div class="ai-progress" data-ai-progress>
+    <div class="ai-progress-line">
+      <span>ИИ-проверка файла</span>
+      <b data-ai-percent>0%</b>
+    </div>
+    <div class="ai-progress-track"><div class="ai-progress-fill" data-ai-fill></div></div>
+    <div class="ai-progress-message" data-ai-message>Ожидание запуска</div>
+  </div>
 </form>
 <form action="/finalize/{esc(run_id)}" method="post">
   <datalist id="request-options">
@@ -1015,8 +1150,16 @@ def render_review(run_id: str) -> bytes:
         review_html = f"""
 <div class="panel empty">Спорных строк нет. Можно сразу скачать итоговый Excel.</div>
 <div class="actions">
-  <form action="/rerun-ai/{esc(run_id)}" method="post">
-    <button class="btn secondary" type="submit">Перепроверить весь файл через ИИ</button>
+  <form class="ai-rerun-form" action="/rerun-ai/{esc(run_id)}" method="post" data-ai-rerun data-run-id="{esc(run_id)}">
+    <button class="btn secondary" type="submit" data-ai-button>Перепроверить весь файл через ИИ</button>
+    <div class="ai-progress" data-ai-progress>
+      <div class="ai-progress-line">
+        <span>ИИ-проверка файла</span>
+        <b data-ai-percent>0%</b>
+      </div>
+      <div class="ai-progress-track"><div class="ai-progress-fill" data-ai-fill></div></div>
+      <div class="ai-progress-message" data-ai-message>Ожидание запуска</div>
+    </div>
   </form>
   <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать Excel</a>
   <a class="btn secondary" href="/">Новая обработка</a>
@@ -1071,6 +1214,15 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def redirect(self, location: str) -> None:
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", location)
@@ -1096,6 +1248,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/download/"):
             self.serve_download(path)
+            return
+        if path.startswith("/progress/"):
+            run_id = safe_filename(unquote(path.removeprefix("/progress/")), "run")
+            self.send_json(get_ai_job(run_id))
             return
         self.send_html(render_home("Страница не найдена."), HTTPStatus.NOT_FOUND)
 
@@ -1209,17 +1365,54 @@ class AppHandler(BaseHTTPRequestHandler):
     def handle_rerun_ai(self, run_id: str) -> None:
         run_dir = RUNS_DIR / run_id
         if not (run_dir / "state.json").exists():
-            self.send_html(render_home("Обработка не найдена. Загрузите файлы заново."), HTTPStatus.NOT_FOUND)
+            self.send_json({"state": "error", "message": "Обработка не найдена"}, HTTPStatus.NOT_FOUND)
             return
-        request_items, matches, errors = load_state(run_dir)
-        supplier_items = [match.supplier_item for match in matches]
-        updated = build_matches(request_items, supplier_items)
-        clean_errors = [error for error in errors if not error.startswith("DeepSeek ")]
-        clean_errors.extend(get_ai_warnings())
-        write_review(run_dir / "review.xlsx", updated, request_items)
-        write_final(run_dir / "summary.xlsx", request_items, updated)
-        save_state(run_dir, request_items, updated, clean_errors)
-        self.redirect(f"/review/{run_id}")
+        existing = get_ai_job(run_id)
+        if existing.get("state") == "running":
+            self.send_json(existing)
+            return
+
+        def update_progress(current: int, total: int, message: str) -> None:
+            percent = round((current / total) * 100) if total else 0
+            set_ai_job(
+                run_id,
+                state="running",
+                current=current,
+                total=total,
+                percent=percent,
+                message=message,
+                redirect=f"/review/{run_id}",
+            )
+
+        def worker() -> None:
+            try:
+                set_ai_job(run_id, state="running", current=0, total=0, percent=0, message="Готовим файл к ИИ-проверке")
+                request_items, matches, errors = load_state(run_dir)
+                supplier_items = [match.supplier_item for match in matches]
+                updated = build_matches(request_items, supplier_items, progress_callback=update_progress)
+                clean_errors = [error for error in errors if not error.startswith("DeepSeek ")]
+                clean_errors.extend(get_ai_warnings())
+                write_review(run_dir / "review.xlsx", updated, request_items)
+                write_final(run_dir / "summary.xlsx", request_items, updated)
+                save_state(run_dir, request_items, updated, clean_errors)
+                total = len(updated)
+                matched = sum(1 for match in updated if match.request_pos)
+                percent = round((matched / total) * 100, 1) if total else 0
+                set_ai_job(
+                    run_id,
+                    state="done",
+                    current=total,
+                    total=total,
+                    percent=100,
+                    message=f"Готово. Сопоставлено {percent}%",
+                    redirect=f"/review/{run_id}",
+                )
+            except Exception as exc:  # noqa: BLE001
+                set_ai_job(run_id, state="error", percent=0, message=f"Ошибка ИИ-проверки: {exc}", redirect=f"/review/{run_id}")
+
+        set_ai_job(run_id, state="running", current=0, total=0, percent=0, message="Запускаем ИИ-проверку", redirect=f"/review/{run_id}")
+        threading.Thread(target=worker, daemon=True).start()
+        self.send_json(get_ai_job(run_id))
 
     def serve_download(self, path: str, send_body: bool = True) -> None:
         parts = [part for part in path.split("/") if part]

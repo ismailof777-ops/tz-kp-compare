@@ -123,6 +123,9 @@ SYNONYM_GROUPS = {
     "штукатурка": {"штукатурка", "штукатурки", "декоративная", "камешковая"},
     "водосток": {"водосток", "водосточная", "сток", "слив", "колено", "труба", "муфта", "хомут"},
     "osb": {"osb", "осп", "osb3", "osb-3"},
+    "кирпич": {"кирпич", "кирпичи", "кладочный", "кладочная"},
+    "пиломатериал": {"пиломатериал", "доска", "брус", "рейка", "стропила", "лагa", "лаги"},
+    "арматура": {"арматура", "арматурный", "а500", "а400", "рифленая"},
 }
 
 SYNONYM_BY_TOKEN = {
@@ -179,6 +182,14 @@ class Match:
     score: float
     status: str
     reason: str
+
+
+@dataclass(frozen=True)
+class QuantityCheck:
+    status: str
+    display: str
+    converted_qty: float | None = None
+    converted_unit: str = ""
 
 
 STATUS_LABELS = {
@@ -293,10 +304,12 @@ def item_categories(text: str) -> frozenset[str]:
 
 
 def normalized_unit(unit: str) -> str:
-    raw = clean_text(unit).lower().replace("²", "2").replace("^2", "2")
+    raw = clean_text(unit).lower().replace("²", "2").replace("^2", "2").replace("³", "3").replace("^3", "3")
     raw = raw.replace(" ", "").replace(".", "")
     if raw in {"м2", "квм", "квм2"}:
         return "m2"
+    if raw in {"м3", "кубм", "куб"}:
+        return "m3"
     if raw in {"м", "мп", "пм"}:
         return "m"
     if raw in {"шт", "штук"}:
@@ -309,9 +322,13 @@ def normalized_unit(unit: str) -> str:
         return "pack"
     if raw in {"кг"}:
         return "kg"
+    if raw in {"т", "тн", "тонна", "тонны"}:
+        return "ton"
     unit_norm = normalize(unit)
     if unit_norm in {"м2", "м.2", "кв.м", "кв", "м²"}:
         return "m2"
+    if unit_norm in {"м3", "м.3", "куб.м", "куб"}:
+        return "m3"
     if unit_norm in {"м", "м.п", "п.м", "мп"}:
         return "m"
     if unit_norm in {"шт", "штук"}:
@@ -324,6 +341,8 @@ def normalized_unit(unit: str) -> str:
         return "pack"
     if unit_norm in {"кг"}:
         return "kg"
+    if unit_norm in {"т", "тн", "тонна", "тонны"}:
+        return "ton"
     return unit_norm
 
 
@@ -331,8 +350,8 @@ def normalized_unit(unit: str) -> str:
 def area_m2_from_text(text: str) -> float | None:
     normalized = normalize(text)
     area_patterns = [
-        r"(?:s|площадь)\s*=?\s*(\d+(?:\.\d+)?)\s*(?:м2|м²|кв\.?м)",
-        r"(\d+(?:\.\d+)?)\s*(?:м2|м²|кв\.?м)",
+        r"(?:s|площадь)\s*=?\s*(\d+(?:\.\d+)?)\s*(?:м2|м²|m2|m²|кв\.?м)",
+        r"(\d+(?:\.\d+)?)\s*(?:м2|м²|m2|m²|кв\.?м)",
     ]
     for pattern in area_patterns:
         match = re.search(pattern, normalized)
@@ -349,20 +368,185 @@ def area_m2_from_text(text: str) -> float | None:
     return None
 
 
-def quantities_compatible(request: RequestItem, offer: SupplierItem) -> bool:
-    if request.qty is None or offer.qty is None:
-        return False
+def _dimensions_m_from_text(text: str) -> tuple[float, ...]:
+    prepared = clean_text(text).lower()
+    prepared = prepared.replace("×", "x").replace("*", "x").replace("х", "x").replace(",", ".")
+    match = re.search(r"(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)(?:\s*x\s*(\d+(?:\.\d+)?))?", prepared)
+    if not match:
+        return ()
+    values = [parse_number(value) for value in match.groups() if value]
+    if not values or any(value is None for value in values):
+        return ()
+    numbers = [float(value) for value in values if value is not None]
+    if any(number > 50 for number in numbers):
+        return tuple(number / 1000 for number in numbers)
+    return tuple(numbers)
+
+
+@lru_cache(maxsize=40000)
+def dimension_area_m2_from_text(text: str) -> float | None:
+    dims = _dimensions_m_from_text(text)
+    if len(dims) >= 2:
+        return round(dims[0] * dims[1], 4)
+    return None
+
+
+@lru_cache(maxsize=40000)
+def volume_m3_from_text(text: str) -> float | None:
+    normalized = normalize(text)
+    volume_patterns = [
+        r"(\d+(?:\.\d+)?)\s*(?:м3|м³|m3|m³|куб\.?м)",
+    ]
+    for pattern in volume_patterns:
+        match = re.search(pattern, normalized)
+        if match:
+            value = parse_number(match.group(1))
+            if value:
+                return value
+    dims = _dimensions_m_from_text(text)
+    if len(dims) >= 3:
+        return round(dims[0] * dims[1] * dims[2], 6)
+    return None
+
+
+@lru_cache(maxsize=40000)
+def count_per_kg_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    patterns = [
+        r"(\d+(?:\.\d+)?)\s*шт\s*/\s*кг",
+        r"(\d+(?:\.\d+)?)\s*шт\s+в\s+кг",
+        r"(\d+(?:\.\d+)?)\s*шт\s+на\s+кг",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, source)
+        if match:
+            value = parse_number(match.group(1))
+            if value:
+                return value
+    return None
+
+
+@lru_cache(maxsize=40000)
+def rebar_kg_per_piece_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    if "армат" not in source and "а500" not in source and "a500" not in source:
+        return None
+    diameter_match = re.search(r"(?:ф|d|f|ø)\s*(\d+(?:\.\d+)?)", source)
+    if not diameter_match:
+        diameter_match = re.search(r"(\d+(?:\.\d+)?)\s*мм", source)
+    length_match = re.search(r"(?:l|длина)\s*=?\s*(\d+(?:\.\d+)?)\s*м", source)
+    if not length_match:
+        length_match = re.search(r"(\d+(?:\.\d+)?)\s*м\b", source)
+    if not diameter_match:
+        return None
+    diameter = parse_number(diameter_match.group(1))
+    length = parse_number(length_match.group(1)) if length_match else 11.7
+    if not diameter or not length:
+        return None
+    return round(0.006165 * diameter * diameter * length, 6)
+
+
+def first_number(*values: float | None) -> float | None:
+    return next((value for value in values if value), None)
+
+
+def converted_quantity(request: RequestItem, offer: SupplierItem) -> tuple[float | None, str]:
+    if offer.qty is None:
+        return None, ""
     req_unit = normalized_unit(request.unit)
     offer_unit = normalized_unit(offer.unit)
     if req_unit == offer_unit:
-        return abs(request.qty - offer.qty) <= max(0.01, request.qty * 0.02)
-    req_area = area_m2_from_text(request.name)
+        return offer.qty, req_unit
+
     offer_area = area_m2_from_text(offer.name)
-    if req_unit == "m2" and offer_unit in {"sheet", "roll", "pack", "pcs"} and offer_area:
-        return abs(request.qty - offer.qty * offer_area) <= max(0.05, request.qty * 0.12)
-    if offer_unit == "m2" and req_unit in {"sheet", "roll", "pack", "pcs"} and req_area:
-        return abs(request.qty * req_area - offer.qty) <= max(0.05, offer.qty * 0.12)
-    return False
+    offer_dimension_area = dimension_area_m2_from_text(offer.name)
+    request_area = area_m2_from_text(request.name)
+    request_dimension_area = dimension_area_m2_from_text(request.name)
+    offer_volume = volume_m3_from_text(offer.name)
+    request_volume = volume_m3_from_text(request.name)
+    combined_text = f"{offer.name} {request.name}"
+
+    if req_unit == "m2" and offer_unit in {"pcs", "sheet"}:
+        area = first_number(offer_dimension_area, offer_area, request_dimension_area, request_area)
+        if area:
+            return offer.qty * area, "m2"
+    if req_unit == "m2" and offer_unit in {"roll", "pack"}:
+        area = first_number(offer_area, offer_dimension_area, request_area, request_dimension_area)
+        if area:
+            return offer.qty * area, "m2"
+    if offer_unit == "m2" and req_unit in {"pcs", "sheet"}:
+        area = first_number(request_dimension_area, request_area, offer_dimension_area, offer_area)
+        if area:
+            return offer.qty / area, req_unit
+    if offer_unit == "m2" and req_unit in {"roll", "pack"}:
+        area = first_number(request_area, request_dimension_area, offer_area, offer_dimension_area)
+        if area:
+            return offer.qty / area, req_unit
+    if req_unit == "m3" and offer_unit in {"pcs", "sheet", "pack"}:
+        volume = first_number(offer_volume, request_volume)
+        if volume:
+            return offer.qty * volume, "m3"
+    if offer_unit == "m3" and req_unit in {"pcs", "sheet", "pack"}:
+        volume = first_number(request_volume, offer_volume)
+        if volume:
+            return offer.qty / volume, req_unit
+    if req_unit == "pcs" and offer_unit == "kg":
+        count_per_kg = first_number(count_per_kg_from_text(offer.name), count_per_kg_from_text(request.name))
+        if count_per_kg:
+            return offer.qty * count_per_kg, "pcs"
+    if req_unit == "ton":
+        if offer_unit == "kg":
+            return offer.qty / 1000, "ton"
+        if offer_unit == "pcs":
+            kg_per_piece = first_number(
+                rebar_kg_per_piece_from_text(offer.name),
+                rebar_kg_per_piece_from_text(request.name),
+                rebar_kg_per_piece_from_text(combined_text),
+            )
+            if kg_per_piece:
+                return offer.qty * kg_per_piece / 1000, "ton"
+    if req_unit == "kg" and offer_unit == "pcs":
+        kg_per_piece = first_number(
+            rebar_kg_per_piece_from_text(offer.name),
+            rebar_kg_per_piece_from_text(request.name),
+            rebar_kg_per_piece_from_text(combined_text),
+        )
+        if kg_per_piece:
+            return offer.qty * kg_per_piece, "kg"
+    return None, ""
+
+
+def fmt_quantity_value(value: float | None) -> str:
+    if value is None:
+        return ""
+    if abs(value - round(value)) < 0.001:
+        return str(int(round(value)))
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def quantity_check(request: RequestItem, offer: SupplierItem) -> QuantityCheck:
+    original = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
+    if request.qty is None or offer.qty is None:
+        return QuantityCheck("unknown", original)
+    req_unit = normalized_unit(request.unit)
+    offer_unit = normalized_unit(offer.unit)
+    converted, converted_unit = converted_quantity(request, offer)
+    display = original
+    if converted is not None and converted_unit == req_unit and (req_unit != offer_unit or abs(converted - offer.qty) > 0.001):
+        display = f"{original}\n~ {fmt_quantity_value(converted)} {request.unit}".strip()
+    comparable_qty = converted if converted is not None and converted_unit == req_unit else (offer.qty if req_unit == offer_unit else None)
+    if comparable_qty is None:
+        return QuantityCheck("unknown", display)
+    tolerance = max(0.01, request.qty * 0.02)
+    if abs(request.qty - comparable_qty) <= tolerance:
+        return QuantityCheck("ok", display, comparable_qty, req_unit)
+    if comparable_qty < request.qty:
+        return QuantityCheck("low", display, comparable_qty, req_unit)
+    return QuantityCheck("high", display, comparable_qty, req_unit)
+
+
+def quantities_compatible(request: RequestItem, offer: SupplierItem) -> bool:
+    return quantity_check(request, offer).status == "ok"
 
 
 @lru_cache(maxsize=40000)
@@ -1107,6 +1291,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         PatternFill("solid", fgColor="EEF7E8"),
     ]
     green = PatternFill("solid", fgColor="C6EFCE")
+    dark_green = PatternFill("solid", fgColor="548235")
     red = PatternFill("solid", fgColor="FFC7CE")
     yellow = PatternFill("solid", fgColor="FFF2CC")
     gray = PatternFill("solid", fgColor="F2F2F2")
@@ -1209,23 +1394,29 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.cell(desc_row, start, offer.name)
             ws.cell(value_row, start, offer.row_no)
             ws.cell(value_row, start + 1, offer.price)
-            offer_qty = fmt_qty(offer.qty)
-            ws.cell(value_row, start + 2, f"{offer_qty} {offer.unit}".strip())
+            qty_result = quantity_check(request, offer)
+            ws.cell(value_row, start + 2, qty_result.display)
             ws.cell(value_row, start + 3, offer.total)
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
-            qty_ok = quantities_compatible(request, offer)
+            qty_ok = qty_result.status == "ok"
             if offer.price is not None and min_price is not None and abs(offer.price - min_price) < 0.0001:
                 ws.cell(value_row, start + 1).fill = green
             if offer.price is not None and max_price is not None and abs(offer.price - max_price) < 0.0001 and max_price != min_price:
                 ws.cell(value_row, start + 1).fill = red
-            if qty_ok:
-                ws.cell(value_row, start + 2).fill = green
+            qty_cell = ws.cell(value_row, start + 2)
+            if qty_result.status == "ok":
+                qty_cell.fill = green
+            elif qty_result.status == "low":
+                qty_cell.fill = yellow
+            elif qty_result.status == "high":
+                qty_cell.fill = dark_green
+                qty_cell.font = Font(bold=True, color="FFFFFF")
             if ws.cell(value_row, start + 4).value == "✓":
                 ws.cell(value_row, start + 4).fill = green
             needs_review = match.status == "review" or "разные бренды" in (match.reason or "")
             if needs_review:
                 ws.cell(desc_row, start).fill = red if "разные бренды" in (match.reason or "") else yellow
-                if not qty_ok:
+                if qty_result.status == "unknown":
                     ws.cell(value_row, start + 2).fill = yellow
         ws.row_dimensions[desc_row].height = 28
         ws.row_dimensions[label_row].height = 21

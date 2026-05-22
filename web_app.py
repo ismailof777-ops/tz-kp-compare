@@ -977,6 +977,9 @@ def render_review(run_id: str) -> bytes:
 
     if rows_html:
         review_html = f"""
+<form class="actions" action="/rerun-ai/{esc(run_id)}" method="post">
+  <button class="btn secondary" type="submit">Перепроверить весь файл через ИИ</button>
+</form>
 <form action="/finalize/{esc(run_id)}" method="post">
   <datalist id="request-options">
     {request_options}
@@ -1009,6 +1012,9 @@ def render_review(run_id: str) -> bytes:
         review_html = f"""
 <div class="panel empty">Спорных строк нет. Можно сразу скачать итоговый Excel.</div>
 <div class="actions">
+  <form action="/rerun-ai/{esc(run_id)}" method="post">
+    <button class="btn secondary" type="submit">Перепроверить весь файл через ИИ</button>
+  </form>
   <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать Excel</a>
   <a class="btn secondary" href="/">Новая обработка</a>
 </div>"""
@@ -1105,6 +1111,10 @@ class AppHandler(BaseHTTPRequestHandler):
             run_id = safe_filename(unquote(parsed.path.removeprefix("/finalize/")), "run")
             self.handle_finalize(run_id)
             return
+        if parsed.path.startswith("/rerun-ai/"):
+            run_id = safe_filename(unquote(parsed.path.removeprefix("/rerun-ai/")), "run")
+            self.handle_rerun_ai(run_id)
+            return
         self.send_html(render_home("Неверный адрес формы."), HTTPStatus.NOT_FOUND)
 
     def handle_process(self) -> None:
@@ -1191,6 +1201,21 @@ class AppHandler(BaseHTTPRequestHandler):
         write_final(run_dir / "summary.xlsx", request_items, updated)
         save_state(run_dir, request_items, updated, errors)
         self.redirect(f"/done/{run_id}")
+
+    def handle_rerun_ai(self, run_id: str) -> None:
+        run_dir = RUNS_DIR / run_id
+        if not (run_dir / "state.json").exists():
+            self.send_html(render_home("Обработка не найдена. Загрузите файлы заново."), HTTPStatus.NOT_FOUND)
+            return
+        request_items, matches, errors = load_state(run_dir)
+        supplier_items = [match.supplier_item for match in matches]
+        updated = build_matches(request_items, supplier_items)
+        clean_errors = [error for error in errors if not error.startswith("DeepSeek ")]
+        clean_errors.extend(get_ai_warnings())
+        write_review(run_dir / "review.xlsx", updated, request_items)
+        write_final(run_dir / "summary.xlsx", request_items, updated)
+        save_state(run_dir, request_items, updated, clean_errors)
+        self.redirect(f"/review/{run_id}")
 
     def serve_download(self, path: str, send_body: bool = True) -> None:
         parts = [part for part in path.split("/") if part]

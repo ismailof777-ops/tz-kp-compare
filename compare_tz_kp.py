@@ -410,6 +410,38 @@ def volume_m3_from_text(text: str) -> float | None:
 
 
 @lru_cache(maxsize=40000)
+def length_m_from_text(text: str) -> float | None:
+    source = clean_text(text).lower().replace(",", ".")
+    patterns = [
+        r"(?:l|длина)\s*=?\s*(\d+(?:\.\d+)?)\s*(?:м|m)\b",
+        r"\b(\d+(?:\.\d+)?)\s*(?:м|m)\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, source):
+            value = parse_number(match.group(1))
+            if value and 0.05 <= value <= 20:
+                return value
+    return None
+
+
+@lru_cache(maxsize=40000)
+def is_linear_profile_text(text: str) -> bool:
+    normalized = normalize(text)
+    markers = {
+        "профиль",
+        "профил",
+        "рейка",
+        "рейки",
+        "каркас",
+        "планка",
+        "подвес",
+        "уголок",
+        "направляющая",
+    }
+    return any(marker in normalized for marker in markers)
+
+
+@lru_cache(maxsize=40000)
 def count_per_kg_from_text(text: str) -> float | None:
     source = clean_text(text).lower().replace(",", ".")
     patterns = [
@@ -464,8 +496,18 @@ def converted_quantity(request: RequestItem, offer: SupplierItem) -> tuple[float
     request_dimension_area = dimension_area_m2_from_text(request.name)
     offer_volume = volume_m3_from_text(offer.name)
     request_volume = volume_m3_from_text(request.name)
+    offer_length = length_m_from_text(offer.name)
+    request_length = length_m_from_text(request.name)
     combined_text = f"{offer.name} {request.name}"
 
+    if req_unit == "m" and offer_unit in {"pcs", "sheet"}:
+        length = first_number(offer_length, request_length)
+        if length:
+            return offer.qty * length, "m"
+    if offer_unit == "m" and req_unit in {"pcs", "sheet"}:
+        length = first_number(request_length, offer_length)
+        if length:
+            return offer.qty / length, req_unit
     if req_unit == "m2" and offer_unit in {"pcs", "sheet"}:
         area = first_number(offer_dimension_area, offer_area, request_dimension_area, request_area)
         if area:
@@ -524,10 +566,41 @@ def fmt_quantity_value(value: float | None) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
+def linear_meter_quantity_check(request: RequestItem, offer: SupplierItem) -> QuantityCheck | None:
+    if request.qty is None or offer.qty is None:
+        return None
+    req_unit = normalized_unit(request.unit)
+    offer_unit = normalized_unit(offer.unit)
+    linear_units = {"m", "pcs", "sheet"}
+    if req_unit not in linear_units or offer_unit not in linear_units or not ({req_unit, offer_unit} & {"pcs", "sheet"}):
+        return None
+    combined_text = f"{request.name} {offer.name}"
+    if not is_linear_profile_text(combined_text):
+        return None
+    length = first_number(length_m_from_text(offer.name), length_m_from_text(request.name))
+    if not length:
+        return None
+    request_m = request.qty * length if req_unit in {"pcs", "sheet"} else request.qty
+    offer_m = offer.qty * length if offer_unit in {"pcs", "sheet"} else offer.qty
+    display = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
+    if offer_unit in {"pcs", "sheet"}:
+        unit_label = request.unit if normalized_unit(request.unit) == "m" else "м.п."
+        display = f"{display}\n~ {fmt_quantity_value(offer_m)} {unit_label}".strip()
+    tolerance = max(0.01, request_m * 0.02)
+    if abs(request_m - offer_m) <= tolerance:
+        return QuantityCheck("ok", display, offer_m, "m")
+    if offer_m < request_m:
+        return QuantityCheck("low", display, offer_m, "m")
+    return QuantityCheck("high", display, offer_m, "m")
+
+
 def quantity_check(request: RequestItem, offer: SupplierItem) -> QuantityCheck:
     original = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
     if request.qty is None or offer.qty is None:
         return QuantityCheck("unknown", original)
+    linear_check = linear_meter_quantity_check(request, offer)
+    if linear_check:
+        return linear_check
     req_unit = normalized_unit(request.unit)
     offer_unit = normalized_unit(offer.unit)
     converted, converted_unit = converted_quantity(request, offer)

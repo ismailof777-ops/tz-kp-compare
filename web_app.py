@@ -900,61 +900,6 @@ def page(title: str, body: str) -> bytes:
       reviewRows.forEach((row) => row.querySelector('input')?.addEventListener('change', updateReviewSearch));
       updateReviewSearch();
     }}
-    document.querySelectorAll('[data-ai-rerun]').forEach((form) => {{
-      const button = form.querySelector('[data-ai-button]');
-      const progress = form.querySelector('[data-ai-progress]');
-      const fill = form.querySelector('[data-ai-fill]');
-      const percentNode = form.querySelector('[data-ai-percent]');
-      const messageNode = form.querySelector('[data-ai-message]');
-      const runId = form.dataset.runId;
-      const setProgress = (data) => {{
-        const percent = Math.max(0, Math.min(100, Number(data.percent || 0)));
-        if (progress) progress.classList.add('is-visible');
-        if (fill) fill.style.width = percent + '%';
-        if (percentNode) percentNode.textContent = percent + '%';
-        if (messageNode) messageNode.textContent = data.message || 'ИИ проверяет файл';
-      }};
-      const poll = async () => {{
-        const response = await fetch('/progress/' + encodeURIComponent(runId), {{ cache: 'no-store' }});
-        const data = await response.json();
-        setProgress(data);
-        if (data.state === 'done') {{
-          window.location.href = data.redirect || ('/review/' + runId);
-          return;
-        }}
-        if (data.state === 'error') {{
-          if (button) {{
-            button.disabled = false;
-            button.textContent = 'Перепроверить весь файл через ИИ';
-          }}
-          return;
-        }}
-        window.setTimeout(poll, 1000);
-      }};
-      form.addEventListener('submit', async (event) => {{
-        event.preventDefault();
-        if (button) {{
-          button.disabled = true;
-          button.textContent = 'ИИ проверяет...';
-        }}
-        setProgress({{ percent: 0, message: 'Запускаем ИИ-проверку' }});
-        try {{
-          const response = await fetch(form.action, {{
-            method: 'POST',
-            headers: {{ 'Accept': 'application/json' }},
-          }});
-          const data = await response.json();
-          setProgress(data);
-          poll();
-        }} catch (error) {{
-          setProgress({{ percent: 0, message: 'Не удалось запустить ИИ-проверку' }});
-          if (button) {{
-            button.disabled = false;
-            button.textContent = 'Перепроверить весь файл через ИИ';
-          }}
-        }}
-      }});
-    }});
   </script>
 </body>
 </html>"""
@@ -1223,22 +1168,11 @@ def render_review(run_id: str) -> bytes:
 
     if rows_html:
         review_html = f"""
-<form class="actions ai-rerun-form" action="/rerun-ai/{esc(run_id)}" method="post" data-ai-rerun data-run-id="{esc(run_id)}">
-  <button class="btn secondary" type="submit" data-ai-button>Перепроверить весь файл через ИИ</button>
-  <div class="ai-progress" data-ai-progress>
-    <div class="ai-progress-line">
-      <span>ИИ-проверка файла</span>
-      <b data-ai-percent>0%</b>
-    </div>
-    <div class="ai-progress-track"><div class="ai-progress-fill" data-ai-fill></div></div>
-    <div class="ai-progress-message" data-ai-message>Ожидание запуска</div>
-  </div>
-</form>
 <form action="/finalize/{esc(run_id)}" method="post">
   <datalist id="request-options">
     {request_options}
   </datalist>
-  <div class="notice warn">В поле "Позиция заявки" начните вводить название, бренд или номер позиции. Сервис покажет подсказки из заявки.</div>
+  <div class="notice warn">ИИ-проверка уже выполнена. В поле "Позиция заявки" можно подтвердить предложенный вариант, выбрать подсказку или начать вводить название, бренд либо номер позиции.</div>
   <div class="table-wrap">
     <table class="review-table">
       <thead>
@@ -1266,17 +1200,6 @@ def render_review(run_id: str) -> bytes:
         review_html = f"""
 <div class="panel empty">Спорных строк нет. Можно сразу скачать итоговый Excel.</div>
 <div class="actions">
-  <form class="ai-rerun-form" action="/rerun-ai/{esc(run_id)}" method="post" data-ai-rerun data-run-id="{esc(run_id)}">
-    <button class="btn secondary" type="submit" data-ai-button>Перепроверить весь файл через ИИ</button>
-    <div class="ai-progress" data-ai-progress>
-      <div class="ai-progress-line">
-        <span>ИИ-проверка файла</span>
-        <b data-ai-percent>0%</b>
-      </div>
-      <div class="ai-progress-track"><div class="ai-progress-fill" data-ai-fill></div></div>
-      <div class="ai-progress-message" data-ai-message>Ожидание запуска</div>
-    </div>
-  </form>
   <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать Excel</a>
   <a class="btn secondary" href="/">Новая обработка</a>
 </div>"""
@@ -1302,6 +1225,7 @@ def render_review(run_id: str) -> bytes:
   <div><b>Товарные</b> - строки КП с материалами и товарами. Именно они участвуют в проценте сопоставления.</div>
   <div><b>Доставка/услуги</b> - доставка, разгрузка и транспортные услуги. Они сохраняются в Excel отдельным листом и не смешиваются с товарами.</div>
   <div><b>К проверке</b> - строки, где система предложила совпадение, но человеку лучше подтвердить выбор перед финальным Excel.</div>
+  <div><b>ИИ</b> - проверка уже выполнена на этапе загрузки файлов; этот экран нужен только для ручного контроля спорных совпадений.</div>
 </div>
 {review_html}
 """

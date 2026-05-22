@@ -1147,7 +1147,7 @@ def render_review(run_id: str) -> bytes:
                 full = f"{suggestion.pos} - {suggestion.name}"
                 suggestion_buttons += (
                     f'<button class="suggestion" type="button" data-suggest="{esc(value)}" '
-                    f'title="{esc(full)}">{esc(suggestion.pos)} <span class="suggestion-label">похожесть {round(score * 100)}%</span></button>'
+                    f'title="{esc(full)}">{esc(suggestion.pos)} <span class="suggestion-label">совпадение {round(score * 100)}%</span></button>'
                 )
             suggestion_buttons += "</div>"
         match_input = f"""
@@ -1228,7 +1228,7 @@ def render_review(run_id: str) -> bytes:
   <div><b>Товарные</b> - строки КП с материалами и товарами. Именно они участвуют в проценте сопоставления.</div>
   <div><b>Доставка/услуги</b> - доставка, разгрузка и транспортные услуги. Они сохраняются в Excel отдельным листом и не смешиваются с товарами.</div>
   <div><b>К проверке</b> - строки, где система предложила совпадение, но человеку лучше подтвердить выбор перед финальным Excel.</div>
-  <div><b>Подсказки</b> - варианты под полем показывают возможные совпадения. Чем выше процент, тем больше похожи позиции.</div>
+  <div><b>Подсказки</b> - варианты под полем показывают возможные совпадения. Чем выше процент, тем вероятнее совпадение.</div>
 </div>
 {review_html}
 """

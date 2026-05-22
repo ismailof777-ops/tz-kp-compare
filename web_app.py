@@ -54,13 +54,21 @@ CSS = """
   --green: #d9f2df;
   --red: #f9d6d5;
   --yellow: #fff2c6;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 * { box-sizing: border-box; }
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 Arial, Helvetica, sans-serif;
+  font: 14px/1.45 var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .shell {
   width: min(1180px, calc(100% - 32px));
@@ -359,7 +367,7 @@ input[type="search"] { font: inherit; }
   padding: 5px 10px;
   color: var(--muted);
   font-size: 13px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
 }
 .summary-item b {
   color: var(--text);

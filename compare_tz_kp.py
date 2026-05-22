@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, asdict
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -13,6 +16,39 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from pypdf import PdfReader
+
+
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+AI_WARNINGS: list[str] = []
+
+
+def clear_ai_warnings() -> None:
+    AI_WARNINGS.clear()
+
+
+def get_ai_warnings() -> list[str]:
+    return list(AI_WARNINGS)
+
+
+def record_ai_warning(message: str) -> None:
+    if message not in AI_WARNINGS:
+        AI_WARNINGS.append(message)
+
+
+def load_env_file(path: Path | None = None) -> None:
+    env_path = path or Path(__file__).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip().lstrip("\ufeff")
+        value = value.strip().strip('"').strip("'")
+        if key and not os.environ.get(key):
+            os.environ[key] = value
 
 
 STOP_WORDS = {
@@ -539,7 +575,149 @@ def candidate_request_indexes(offer: SupplierItem, request_items: list[RequestIt
     return candidates or set(range(len(request_items)))
 
 
+def call_deepseek(payload: dict) -> dict | None:
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    body = {
+        "model": os.environ.get("DEEPSEEK_MODEL", DEEPSEEK_MODEL),
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Ты сопоставляешь строительные материалы из заявки и КП. "
+                    "Учитывай синонимы, бренды, размеры, единицы измерения и смысл товара. "
+                    "Примеры: метиз/шуруп/саморез/крепеж близкие группы; ГКЛ/гипсокартон близкие; "
+                    "лист, рулон и упаковка могут соответствовать м2, если площадь указана в названии. "
+                    "Не сопоставляй разные бренды, если бренд принципиален. "
+                    "Ответь только JSON без пояснений."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "task": (
+                            "Для каждой строки offer_positions выбери pos из request_positions или null. "
+                            "Верни JSON: {\"matches\":[{\"offer_id\": число, \"request_pos\": строка или null, "
+                            "\"confidence\": число от 0 до 1, \"reason\": коротко}]}"
+                        ),
+                        **payload,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        "response_format": {"type": "json_object"},
+        "thinking": {"type": "disabled"},
+        "temperature": 0,
+    }
+    request = urllib.request.Request(
+        DEEPSEEK_API_URL,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    timeout = float(os.environ.get("DEEPSEEK_TIMEOUT", "25"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 402:
+            record_ai_warning("DeepSeek не выполнил проверку: на аккаунте нет оплаченного баланса.")
+        elif exc.code in {401, 403}:
+            record_ai_warning("DeepSeek не выполнил проверку: API-ключ не принят сервисом.")
+        else:
+            record_ai_warning(f"DeepSeek не выполнил проверку: API вернул ошибку {exc.code}.")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        record_ai_warning("DeepSeek не выполнил проверку: нет соединения с API или истекло время ожидания.")
+        return None
+
+    try:
+        content = json.loads(raw)["choices"][0]["message"]["content"]
+        return json.loads(content)
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+        record_ai_warning("DeepSeek ответил в неожиданном формате, проверка ИИ пропущена.")
+        return None
+
+
+def improve_matches_with_deepseek(request_items: list[RequestItem], matches: list[Match]) -> list[Match]:
+    if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
+        return matches
+
+    request_payload = [
+        {
+            "pos": item.pos,
+            "name": item.name,
+            "specs": item.specs,
+            "unit": item.unit,
+            "qty": item.qty,
+        }
+        for item in request_items
+    ]
+    by_pos = {item.pos: item for item in request_items}
+    need_ai = [
+        (idx, match)
+        for idx, match in enumerate(matches)
+        if match.status == "review" or not match.request_pos
+    ]
+    max_rows = int(os.environ.get("DEEPSEEK_MAX_AI_ROWS", "120"))
+    batch_size = int(os.environ.get("DEEPSEEK_BATCH_SIZE", "20"))
+    updated = list(matches)
+
+    for start in range(0, min(len(need_ai), max_rows), batch_size):
+        batch = need_ai[start : start + batch_size]
+        offer_payload = [
+            {
+                "offer_id": idx,
+                "supplier": match.supplier_item.supplier,
+                "row_no": match.supplier_item.row_no,
+                "name": match.supplier_item.name,
+                "unit": match.supplier_item.unit,
+                "qty": match.supplier_item.qty,
+                "price": match.supplier_item.price,
+                "current_request_pos": match.request_pos,
+                "current_score": round(match.score, 3),
+            }
+            for idx, match in batch
+        ]
+        result = call_deepseek({"request_positions": request_payload, "offer_positions": offer_payload})
+        if not result:
+            continue
+        for item in result.get("matches", []):
+            try:
+                offer_id = int(item.get("offer_id"))
+            except (TypeError, ValueError):
+                continue
+            if offer_id < 0 or offer_id >= len(updated):
+                continue
+            request_pos = clean_text(item.get("request_pos"))
+            confidence = float(item.get("confidence") or 0)
+            if not request_pos or request_pos not in by_pos or confidence < 0.55:
+                continue
+            old = updated[offer_id]
+            reason = clean_text(item.get("reason") or "")
+            if confidence >= 0.72:
+                updated[offer_id] = Match(old.supplier_item, request_pos, confidence, "auto", "")
+            else:
+                updated[offer_id] = Match(
+                    old.supplier_item,
+                    request_pos,
+                    confidence,
+                    "review",
+                    f"ИИ предлагает проверить: {reason}" if reason else "ИИ предлагает проверить совпадение",
+                )
+    return updated
+
+
 def build_matches(request_items: list[RequestItem], supplier_items: list[SupplierItem]) -> list[Match]:
+    clear_ai_warnings()
+    load_env_file()
     matches: list[Match] = []
     token_index: dict[str, set[int]] = {}
     num_index: dict[str, set[int]] = {}
@@ -565,7 +743,7 @@ def build_matches(request_items: list[RequestItem], supplier_items: list[Supplie
             matches.append(Match(offer, best_item.pos, best_score, status, best_reason))
         else:
             matches.append(Match(offer, None, best_score, "unmatched", "не найдено надежное совпадение"))
-    return matches
+    return improve_matches_with_deepseek(request_items, matches)
 
 
 def write_review(path: Path, matches: list[Match], request_items: list[RequestItem]) -> None:
@@ -920,6 +1098,11 @@ def main() -> None:
         raise SystemExit("Не удалось извлечь ни одной позиции КП.")
 
     matches = build_matches(request_items, supplier_items)
+    ai_warnings = get_ai_warnings()
+    if ai_warnings:
+        print("Предупреждения по ИИ:")
+        for warning in ai_warnings:
+            print(f"- {warning}")
     if args.review_in:
         matches = apply_overrides(matches, read_review_overrides(args.review_in))
     if args.review:

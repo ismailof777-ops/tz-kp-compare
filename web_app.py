@@ -22,6 +22,7 @@ from compare_tz_kp import (
     SupplierItem,
     build_matches,
     clean_text,
+    get_ai_warnings,
     read_offer,
     read_request_xlsx,
     status_label,
@@ -1159,6 +1160,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         matches = build_matches(request_items, supplier_items)
+        errors.extend(get_ai_warnings())
         write_review(run_dir / "review.xlsx", matches, request_items)
         write_final(run_dir / "summary.xlsx", request_items, matches)
         save_state(run_dir, request_items, matches, errors)

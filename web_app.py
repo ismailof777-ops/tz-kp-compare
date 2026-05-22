@@ -354,20 +354,22 @@ input[type="search"] { font: inherit; }
   gap: 6px;
   min-height: 32px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 6px;
   background: #fff;
   padding: 5px 10px;
   color: var(--muted);
   font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 .summary-item b {
   color: var(--text);
   font-size: 16px;
+  font-variant-numeric: tabular-nums;
 }
 .summary-item.attention {
-  border-color: #f1d88d;
-  background: #fff9e8;
-  color: #6f5200;
+  border-color: var(--line);
+  background: #fff;
+  color: var(--muted);
 }
 .notice {
   border-radius: 6px;
@@ -513,7 +515,7 @@ td.small, th.small { width: 118px; }
   .product-intro { padding: 14px; }
   .intro-points { display: flex; }
   .review-summary { align-items: stretch; }
-  .summary-item { flex: 1 1 145px; justify-content: center; border-radius: 8px; }
+  .summary-item { flex: 1 1 145px; justify-content: center; }
   .review-tools { grid-template-columns: 1fr; }
   .review-count { padding-bottom: 0; }
   h1 { font-size: 21px; }

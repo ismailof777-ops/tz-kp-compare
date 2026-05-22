@@ -669,14 +669,20 @@ def improve_matches_with_deepseek(request_items: list[RequestItem], matches: lis
         for item in request_items
     ]
     by_pos = {item.pos: item for item in request_items}
-    need_ai = [
-        (idx, match)
-        for idx, match in enumerate(matches)
-        if match.status == "review" or not match.request_pos
-    ]
-    max_rows = int(os.environ.get("DEEPSEEK_MAX_AI_ROWS", "120"))
+    ai_scope = os.environ.get("DEEPSEEK_AI_SCOPE", "all").strip().lower()
+    if ai_scope == "all":
+        need_ai = list(enumerate(matches))
+    else:
+        need_ai = [
+            (idx, match)
+            for idx, match in enumerate(matches)
+            if match.status == "review" or not match.request_pos
+        ]
+    max_rows = int(os.environ.get("DEEPSEEK_MAX_AI_ROWS", "300"))
     batch_size = int(os.environ.get("DEEPSEEK_BATCH_SIZE", "20"))
     updated = list(matches)
+    if len(need_ai) > max_rows:
+        record_ai_warning(f"DeepSeek проверил только первые {max_rows} строк КП из {len(need_ai)} по текущему лимиту.")
 
     for start in range(0, min(len(need_ai), max_rows), batch_size):
         batch = need_ai[start : start + batch_size]

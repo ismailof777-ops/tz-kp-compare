@@ -186,7 +186,7 @@ STATUS_LABELS = {
     "review": "на проверку",
     "unmatched": "не сопоставлено",
     "manual": "подтверждено на проверке",
-    "service": "служебная строка",
+    "service": "доставка/услуга",
 }
 
 
@@ -932,7 +932,7 @@ def build_matches(
 
     for offer in supplier_items:
         if is_service_item(offer):
-            matches.append(Match(offer, None, 0, "service", "служебная строка: не участвует в проценте сопоставления"))
+            matches.append(Match(offer, None, 0, "service", "доставка или услуга: учитывается отдельно и не входит в процент сопоставления товаров"))
             continue
         best_item = None
         best_score = 0.0
@@ -1266,7 +1266,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     cell.number_format = '#,##0.00 ₽'
 
     if service_items:
-        service = wb.create_sheet("Служебные строки")
+        service = wb.create_sheet("Доставка и услуги")
         headers = ["Поставщик", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
         service.append(headers)
         for offer in service_items:

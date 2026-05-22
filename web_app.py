@@ -530,11 +530,17 @@ td.small, th.small { width: 118px; }
   background: #d5e8ef;
 }
 .progress-bar {
-  width: 42%;
+  width: 0%;
   height: 100%;
   border-radius: 999px;
   background: var(--accent);
-  animation: progress-slide 1.1s ease-in-out infinite;
+  transition: width .25s ease;
+}
+.processing-note {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 .ai-progress {
   display: none;
@@ -572,10 +578,17 @@ td.small, th.small { width: 118px; }
   color: var(--muted);
   font-size: 12px;
 }
-@keyframes progress-slide {
-  0% { transform: translateX(-120%); }
-  50% { transform: translateX(80%); }
-  100% { transform: translateX(260%); }
+.summary-help {
+  display: grid;
+  gap: 6px;
+  margin: -4px 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.summary-help b {
+  color: var(--text);
+  font-weight: 700;
 }
 @media (max-width: 840px) {
   .shell { width: min(100% - 20px, 1180px); padding-top: 18px; }
@@ -616,7 +629,7 @@ def set_ai_job(run_id: str, **updates: object) -> None:
 
 def get_ai_job(run_id: str) -> dict[str, object]:
     with AI_JOBS_LOCK:
-        return dict(
+        payload = dict(
             AI_JOBS.get(
                 run_id,
                 {
@@ -629,6 +642,8 @@ def get_ai_job(run_id: str) -> dict[str, object]:
                 },
             )
         )
+        payload["run_id"] = run_id
+        return payload
 
 
 def page(title: str, body: str) -> bytes:
@@ -651,6 +666,9 @@ def page(title: str, body: str) -> bytes:
       const submitButton = uploadForm.querySelector('[data-submit]');
       const stopButton = uploadForm.querySelector('[data-stop]');
       const processing = uploadForm.querySelector('[data-processing]');
+      const processingFill = uploadForm.querySelector('[data-processing-fill]');
+      const processingPercent = uploadForm.querySelector('[data-processing-percent]');
+      const processingMessage = uploadForm.querySelector('[data-processing-message]');
       let activeController = null;
       const showMessage = (text) => {{
         if (!formMessage) return;
@@ -665,6 +683,30 @@ def page(title: str, body: str) -> bytes:
         }}
         if (stopButton) stopButton.classList.remove('is-visible');
         if (processing) processing.classList.remove('is-visible');
+        if (processingFill) processingFill.style.width = '0%';
+        if (processingPercent) processingPercent.textContent = '0%';
+      }};
+      const setUploadProgress = (data) => {{
+        const percent = Math.max(0, Math.min(100, Number(data.percent || 0)));
+        if (processing) processing.classList.add('is-visible');
+        if (processingFill) processingFill.style.width = percent + '%';
+        if (processingPercent) processingPercent.textContent = percent + '%';
+        if (processingMessage) processingMessage.textContent = data.message || 'Обработка файлов';
+      }};
+      const pollUploadProgress = async (runId) => {{
+        const response = await fetch('/progress/' + encodeURIComponent(runId), {{ cache: 'no-store' }});
+        const data = await response.json();
+        setUploadProgress(data);
+        if (data.state === 'done') {{
+          window.location.href = data.redirect || ('/review/' + runId);
+          return;
+        }}
+        if (data.state === 'error') {{
+          resetProcessingState();
+          showMessage(data.message || 'Не удалось обработать файлы.');
+          return;
+        }}
+        setTimeout(() => pollUploadProgress(runId), 700);
       }};
       const removeInputFile = (input, indexToRemove) => {{
         const transfer = new DataTransfer();
@@ -783,9 +825,22 @@ def page(title: str, body: str) -> bytes:
         try {{
           const response = await fetch(uploadForm.action, {{
             method: 'POST',
+            headers: {{ 'Accept': 'application/json' }},
             body: new FormData(uploadForm),
             signal: activeController.signal,
           }});
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {{
+            const data = await response.json();
+            if (!response.ok || data.state === 'error') {{
+              resetProcessingState();
+              showMessage(data.message || 'Не удалось обработать файлы.');
+              return;
+            }}
+            setUploadProgress(data);
+            pollUploadProgress(data.run_id);
+            return;
+          }}
           if (response.redirected) {{
             window.location.href = response.url;
             return;
@@ -1102,11 +1157,12 @@ def render_home(error: str = "") -> bytes:
     <div class="notice error" data-form-message style="display:none; margin-top:12px; margin-bottom:0"></div>
     <div class="processing" data-processing>
       <div class="processing-head">
-        <strong>Обрабатываем файлы</strong>
-        <span>извлекаем позиции, цены и сроки</span>
+        <strong>Обработка с применением технологий ИИ</strong>
+        <span data-processing-percent>0%</span>
       </div>
-      <div class="progress"><div class="progress-bar"></div></div>
-      <div class="hint">Это может занять до минуты, если файлов много или PDF большой.</div>
+      <div class="progress"><div class="progress-bar" data-processing-fill></div></div>
+      <div class="processing-note" data-processing-message>Загружаем файлы и готовим их к распознаванию.</div>
+      <div class="processing-note">Сервис извлекает позиции, цены и сроки, затем сопоставляет товары с учетом ИИ. Это может занять несколько минут, если файлов много или PDF большой.</div>
     </div>
   </form>
 </section>
@@ -1240,7 +1296,12 @@ def render_review(run_id: str) -> bytes:
   <div class="summary-item"><span>Сопоставлено</span><b>{match_percent}%</b></div>
   <div class="summary-item"><span>Авто</span><b>{stats["auto"]}</b></div>
   <div class="summary-item attention"><span>К проверке</span><b>{stats["review"] + stats["unmatched"]}</b></div>
-  <div class="summary-item"><span>Служебные</span><b>{stats["service"]}</b></div>
+  <div class="summary-item"><span>Доставка/услуги</span><b>{stats["service"]}</b></div>
+</div>
+<div class="summary-help">
+  <div><b>Товарные</b> - строки КП с материалами и товарами. Именно они участвуют в проценте сопоставления.</div>
+  <div><b>Доставка/услуги</b> - доставка, разгрузка и транспортные услуги. Они сохраняются в Excel отдельным листом и не смешиваются с товарами.</div>
+  <div><b>К проверке</b> - строки, где система предложила совпадение, но человеку лучше подтвердить выбор перед финальным Excel.</div>
 </div>
 {review_html}
 """
@@ -1373,30 +1434,72 @@ class AppHandler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(field.file, dst)
             offer_paths.append(target)
 
-        try:
-            request_items = read_request_xlsx(request_path)
-        except Exception as exc:  # noqa: BLE001
-            self.send_html(render_home(f"Не удалось прочитать заявку: {exc}"), HTTPStatus.BAD_REQUEST)
-            return
+        def update_progress(percent: int, message: str) -> None:
+            set_ai_job(
+                run_id,
+                state="running",
+                current=percent,
+                total=100,
+                percent=percent,
+                message=message,
+                redirect=f"/review/{run_id}",
+            )
 
-        supplier_items: list[SupplierItem] = []
-        errors: list[str] = []
-        for offer_path in offer_paths:
+        def update_ai_progress(current: int, total: int, message: str) -> None:
+            ai_percent = round((current / total) * 42) if total else 0
+            update_progress(min(90, 48 + ai_percent), message)
+
+        def worker() -> None:
             try:
-                supplier_items.extend(read_offer(offer_path))
+                update_progress(8, "Читаем файл заявки")
+                request_items = read_request_xlsx(request_path)
+
+                supplier_items: list[SupplierItem] = []
+                errors: list[str] = []
+                for idx, offer_path in enumerate(offer_paths, start=1):
+                    update_progress(12 + round((idx - 1) / max(1, len(offer_paths)) * 24), f"Извлекаем позиции КП: файл {idx} из {len(offer_paths)}")
+                    try:
+                        supplier_items.extend(read_offer(offer_path))
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(str(exc))
+
+                if not supplier_items:
+                    raise ValueError("Не удалось извлечь позиции КП. Проверьте форматы файлов.")
+
+                update_progress(42, "Сопоставляем товары по названиям, синонимам и единицам")
+                matches = build_matches(request_items, supplier_items, progress_callback=update_ai_progress)
+                errors.extend(get_ai_warnings())
+
+                update_progress(93, "Формируем файл проверки и итоговый Excel")
+                write_review(run_dir / "review.xlsx", matches, request_items)
+                write_final(run_dir / "summary.xlsx", request_items, matches)
+                save_state(run_dir, request_items, matches, errors)
+
+                comparable = [match for match in matches if match.status != "service"]
+                total = len(comparable)
+                matched = sum(1 for match in comparable if match.request_pos)
+                percent = round((matched / total) * 100, 1) if total else 0
+                set_ai_job(
+                    run_id,
+                    state="done",
+                    current=100,
+                    total=100,
+                    percent=100,
+                    message=f"Готово. Сопоставлено {percent}% товарных строк",
+                    redirect=f"/review/{run_id}",
+                )
             except Exception as exc:  # noqa: BLE001
-                errors.append(str(exc))
+                set_ai_job(
+                    run_id,
+                    state="error",
+                    percent=0,
+                    message=f"Ошибка обработки: {exc}",
+                    redirect="/",
+                )
 
-        if not supplier_items:
-            self.send_html(render_home("Не удалось извлечь позиции КП. Проверьте форматы файлов."), HTTPStatus.BAD_REQUEST)
-            return
-
-        matches = build_matches(request_items, supplier_items)
-        errors.extend(get_ai_warnings())
-        write_review(run_dir / "review.xlsx", matches, request_items)
-        write_final(run_dir / "summary.xlsx", request_items, matches)
-        save_state(run_dir, request_items, matches, errors)
-        self.redirect(f"/review/{run_id}")
+        update_progress(3, "Файлы загружены. Запускаем обработку")
+        threading.Thread(target=worker, daemon=True).start()
+        self.send_json(get_ai_job(run_id))
 
     def handle_finalize(self, run_id: str) -> None:
         run_dir = RUNS_DIR / run_id

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import io
 import json
 import os
 import re
+import shutil
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, asdict
@@ -16,6 +20,11 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from pypdf import PdfReader
+
+
+LOCAL_PACKAGES = Path(__file__).resolve().parent / ".python_packages"
+if LOCAL_PACKAGES.exists() and str(LOCAL_PACKAGES) not in sys.path:
+    sys.path.insert(0, str(LOCAL_PACKAGES))
 
 
 DEEPSEEK_API_BASE = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
@@ -173,6 +182,7 @@ class SupplierItem:
     price: float | None = None
     total: float | None = None
     delivery: str = ""
+    invoice_no: str = ""
 
 
 @dataclass
@@ -255,6 +265,26 @@ def parse_number(value) -> float | None:
         return float(text)
     except ValueError:
         return None
+
+
+def parse_quantity(value, price: float | None = None, total: float | None = None) -> float | None:
+    qty = parse_number(value)
+    if qty is None:
+        return None
+    if not price or not total or price <= 0 or total <= 0:
+        return qty
+
+    expected = total / price
+    if expected <= 0 or expected >= 1_000_000:
+        return qty
+
+    smaller = max(min(abs(qty), abs(expected)), 0.000001)
+    ratio = max(abs(qty), abs(expected)) / smaller
+    amount_error = abs((qty * price) - total)
+
+    if (qty >= 1_000_000 and ratio >= 10) or (ratio >= 50 and amount_error > max(total * 0.2, 100)):
+        return round(expected, 4)
+    return qty
 
 
 def money_to_float(text: str) -> float | None:
@@ -451,7 +481,7 @@ def package_count_from_text(text: str) -> float | None:
         r"(\d+(?:\.\d+)?)\s*шт\s*/\s*(?:уп|упак|пачк|кор)",
         r"(?:уп|упак|пачк|кор)[^\d]{0,20}(\d+(?:\.\d+)?)\s*шт",
         r"(\d+(?:\.\d+)?)\s*шт\s*/",
-        r"(\d+(?:\.\d+)?)\s*шт\s*[,) ]",
+        r"(\d+(?:\.\d+)?)\s*шт\.?\s*[,) ]",
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, source):
@@ -516,6 +546,67 @@ def is_linear_profile_text(text: str) -> bool:
 
 
 @lru_cache(maxsize=40000)
+def is_lumber_text(text: str) -> bool:
+    normalized = normalize(text)
+    markers = {
+        "пиломатериал",
+        "доска",
+        "доски",
+        "брус",
+        "брусок",
+        "рейка",
+        "стропила",
+        "лага",
+        "лаги",
+        "вагонка",
+    }
+    return any(marker in normalized for marker in markers)
+
+
+@lru_cache(maxsize=40000)
+def lumber_piece_volume_m3_from_text(text: str) -> float | None:
+    dims = _dimensions_m_from_text(text)
+    if len(dims) >= 3:
+        return round(dims[0] * dims[1] * dims[2], 6)
+    return volume_m3_from_text(text)
+
+
+@lru_cache(maxsize=40000)
+def lumber_cross_section_m2_from_text(text: str) -> float | None:
+    dims = _dimensions_m_from_text(text)
+    if len(dims) >= 3:
+        short = sorted(dims)[:2]
+        return round(short[0] * short[1], 6)
+    if len(dims) == 2:
+        return round(dims[0] * dims[1], 6)
+    return None
+
+
+def lumber_quantity_m3(name: str, unit: str, qty: float | None) -> float | None:
+    if qty is None:
+        return None
+    unit_key = normalized_unit(unit)
+    if unit_key == "m3":
+        return qty
+    piece_volume = lumber_piece_volume_m3_from_text(name)
+    cross_section = lumber_cross_section_m2_from_text(name)
+    pack_count = package_count_from_text(name)
+    pack_m = package_linear_m_from_text(name)
+    if unit_key in {"pcs", "sheet"} and piece_volume:
+        return round(qty * piece_volume, 6)
+    if unit_key == "pack":
+        if pack_count and piece_volume:
+            return round(qty * pack_count * piece_volume, 6)
+        if pack_m and cross_section:
+            return round(qty * pack_m * cross_section, 6)
+        if piece_volume:
+            return round(qty * piece_volume, 6)
+    if unit_key == "m" and cross_section:
+        return round(qty * cross_section, 6)
+    return None
+
+
+@lru_cache(maxsize=40000)
 def count_per_kg_from_text(text: str) -> float | None:
     source = clean_text(text).lower().replace(",", ".")
     patterns = [
@@ -561,8 +652,6 @@ def converted_quantity(request: RequestItem, offer: SupplierItem) -> tuple[float
         return None, ""
     req_unit = normalized_unit(request.unit)
     offer_unit = normalized_unit(offer.unit)
-    if req_unit == offer_unit:
-        return offer.qty, req_unit
 
     offer_area = area_m2_from_text(offer.name)
     offer_dimension_area = dimension_area_m2_from_text(offer.name)
@@ -582,6 +671,15 @@ def converted_quantity(request: RequestItem, offer: SupplierItem) -> tuple[float
     request_pack_m = package_linear_m_from_text(request.name)
     combined_text = f"{offer.name} {request.name}"
 
+    if is_lumber_text(combined_text):
+        offer_m3 = lumber_quantity_m3(offer.name, offer.unit, offer.qty)
+        request_m3 = lumber_quantity_m3(request.name, request.unit, request.qty)
+        if offer_m3 is not None and (request_m3 is not None or req_unit == "m3"):
+            return offer_m3, "m3"
+
+    if req_unit == offer_unit:
+        return offer.qty, req_unit
+
     if req_unit == "pcs" and offer_unit == "pack":
         count = first_number(offer_pack_count, request_pack_count)
         if count:
@@ -598,6 +696,14 @@ def converted_quantity(request: RequestItem, offer: SupplierItem) -> tuple[float
         kg = first_number(request_pack_kg, offer_pack_kg)
         if kg:
             return offer.qty / kg, "pack"
+    if req_unit == "kg" and offer_unit in {"pcs", "sheet"}:
+        kg = first_number(offer_pack_kg, request_pack_kg)
+        if kg:
+            return offer.qty * kg, "kg"
+    if offer_unit == "kg" and req_unit in {"pcs", "sheet"}:
+        kg = first_number(request_pack_kg, offer_pack_kg)
+        if kg:
+            return offer.qty / kg, req_unit
     if req_unit == "m" and offer_unit == "pack":
         meters = first_number(offer_pack_m, request_pack_m)
         if meters:
@@ -715,10 +821,33 @@ def linear_meter_quantity_check(request: RequestItem, offer: SupplierItem) -> Qu
     return QuantityCheck("high", display, offer_m, "m")
 
 
+def lumber_quantity_check(request: RequestItem, offer: SupplierItem) -> QuantityCheck | None:
+    if request.qty is None or offer.qty is None:
+        return None
+    combined_text = f"{request.name} {offer.name}"
+    if not is_lumber_text(combined_text):
+        return None
+    request_m3 = lumber_quantity_m3(request.name, request.unit, request.qty)
+    offer_m3 = lumber_quantity_m3(offer.name, offer.unit, offer.qty)
+    if request_m3 is None or offer_m3 is None:
+        return None
+    original = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
+    display = f"{original}\n~ {fmt_quantity_value(offer_m3)} м3".strip()
+    tolerance = max(0.001, request_m3 * 0.02)
+    if abs(request_m3 - offer_m3) <= tolerance:
+        return QuantityCheck("ok", display, offer_m3, "m3")
+    if offer_m3 < request_m3:
+        return QuantityCheck("low", display, offer_m3, "m3")
+    return QuantityCheck("high", display, offer_m3, "m3")
+
+
 def quantity_check(request: RequestItem, offer: SupplierItem) -> QuantityCheck:
     original = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
     if request.qty is None or offer.qty is None:
         return QuantityCheck("unknown", original)
+    lumber_check = lumber_quantity_check(request, offer)
+    if lumber_check:
+        return lumber_check
     linear_check = linear_meter_quantity_check(request, offer)
     if linear_check:
         return linear_check
@@ -842,21 +971,25 @@ def read_request_xlsx(path: Path) -> list[RequestItem]:
     if not found:
         found = find_header_row(ws, ["описание", "объем"])
     if not found:
+        found = find_header_row(ws, ["позици", "кол-во"])
+    if not found:
+        found = find_header_row(ws, ["позици", "ед."])
+    if not found:
         raise ValueError(f"Не нашел строку заголовков заявки в {path.name}")
 
     header_row, _ = found
     pos_col = find_column(ws, header_row, ["№", "номер"]) or 1
-    name_col = find_column(ws, header_row, ["описание закупаемой", "описание"])
+    name_col = find_column(ws, header_row, ["описание закупаемой", "описание", "позици", "наименование", "товар"])
     specs_col = find_column(ws, header_row, ["технические характеристики", "гост"])
-    unit_col = find_column(ws, header_row, ["ед. измерения", "ед измерения"])
-    qty_col = find_column(ws, header_row, ["необходимый объем", "количество"])
+    unit_col = find_column(ws, header_row, ["ед. измерения", "ед измерения", "ед. из", "ед из", "ед."])
+    qty_col = find_column(ws, header_row, ["необходимый объем", "количество", "кол-во", "кол во"])
 
     if not name_col or not qty_col:
         raise ValueError(f"Не нашел колонки описания/количества в заявке {path.name}")
 
     items: list[RequestItem] = []
     for row in range(header_row + 1, ws.max_row + 1):
-        pos = clean_text(ws.cell(row, pos_col).value)
+        pos = clean_text(ws.cell(row, pos_col).value) if pos_col != name_col else ""
         name = clean_text(ws.cell(row, name_col).value)
         unit = clean_text(ws.cell(row, unit_col).value) if unit_col else ""
         qty = parse_number(ws.cell(row, qty_col).value) if qty_col else None
@@ -892,9 +1025,62 @@ def supplier_name_from_file(path: Path) -> str:
     return stem[:45]
 
 
+def invoice_no_from_text(text: str, fallback: str = "") -> str:
+    source = clean_text(text)
+    patterns = [
+        r"\bкп[-\s№Nn#]*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9/_\-.]{1,30})",
+        r"(?:счет|сч[её]т|кп|коммерческое предложение|заказ)\s*(?:№|N|N°|No|#)?\s*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9/_\-.]{1,30})",
+        r"(?:№|N|N°|No|#)\s*([A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9/_\-.]{1,30})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, source, flags=re.IGNORECASE)
+        if match:
+            value = clean_text(match.group(1)).strip(".,;:")
+            if value:
+                return value
+    file_match = re.search(r"\d{3,}", Path(fallback).stem if fallback else "")
+    if file_match:
+        return file_match.group(0)
+    return fallback
+
+
+def invoice_no_from_workbook(wb, path: Path) -> str:
+    samples: list[str] = []
+    for ws in wb.worksheets[:2]:
+        max_row = min(ws.max_row, 18)
+        max_col = min(ws.max_column, 8)
+        for row in ws.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
+            for cell in row:
+                value = clean_text(cell.value)
+                if value:
+                    samples.append(value)
+    return invoice_no_from_text(" ".join(samples), path.name)
+
+
+def invoice_label(offer: SupplierItem) -> str:
+    return offer.invoice_no or invoice_no_from_text("", offer.source)
+
+
+def supplier_invoice_summary(supplier: str, matches: list[Match]) -> str:
+    labels: list[str] = []
+    for match in matches:
+        offer = match.supplier_item
+        if offer.supplier != supplier:
+            continue
+        label = invoice_label(offer)
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return ""
+    if len(labels) > 3:
+        return ", ".join(labels[:3]) + f" +{len(labels) - 3}"
+    return ", ".join(labels)
+
+
 def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[SupplierItem]:
     wb = load_workbook(path, data_only=True)
     supplier = supplier or supplier_name_from_file(path)
+    invoice_no = invoice_no_from_workbook(wb, path)
     items: list[SupplierItem] = []
 
     for ws in wb.worksheets:
@@ -928,10 +1114,11 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             source=path.name,
                             row_no=clean_text(ws.cell(row, pos_col).value) or str(row),
                             name=name,
-                            qty=parse_number(ws.cell(row, qty_col).value),
+                            qty=parse_quantity(ws.cell(row, qty_col).value, price, total),
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
+                            invoice_no=invoice_no,
                         )
                     )
                 continue
@@ -959,11 +1146,12 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             source=path.name,
                             row_no=clean_text(ws.cell(row, pos_col).value) or str(row),
                             name=name,
-                            qty=parse_number(ws.cell(row, qty_col).value) if qty_col else None,
+                            qty=parse_quantity(ws.cell(row, qty_col).value, price, total) if qty_col else None,
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
                             delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else "",
+                            invoice_no=invoice_no,
                         )
                     )
     return items
@@ -996,8 +1184,7 @@ def is_product_continuation(line: str) -> bool:
     return bool(re.search(r"[A-Za-zА-Яа-яЁё]", text))
 
 
-def parse_layout_pdf(path: Path, supplier: str | None = None) -> list[SupplierItem]:
-    supplier = supplier or supplier_name_from_file(path)
+def pdf_text_lines(path: Path, layout: bool = True) -> list[str]:
     reader = PdfReader(str(path))
     text_parts = []
     for page in reader.pages:
@@ -1005,14 +1192,465 @@ def parse_layout_pdf(path: Path, supplier: str | None = None) -> list[SupplierIt
             text_parts.append(page.extract_text(extraction_mode="layout") or "")
         except TypeError:
             text_parts.append(page.extract_text() or "")
-    lines = "\n".join(text_parts).splitlines()
+    return "\n".join(text_parts).splitlines()
 
-    delivery = ""
+
+def delivery_from_pdf_lines(lines: list[str]) -> str:
     for line in lines:
-        if "срок готовности" in line.lower() or "срок поставки" in line.lower():
-            parts = re.split(r":", line, maxsplit=1)
-            delivery = clean_text(parts[-1]) if len(parts) > 1 else clean_text(line)
+        clean = clean_text(line)
+        lower = clean.lower()
+        if "срок исполнения" in lower or "срок поставки" in lower or "ориентировочный срок поставки" in lower:
+            parts = re.split(r":", clean, maxsplit=1)
+            return clean_text(parts[-1]) if len(parts) > 1 else clean
+    return ""
+
+
+def parse_amount_token(value: str) -> float | None:
+    value = clean_text(value).replace("'", "").replace("`", "")
+    value = re.sub(r"(?<=\d)\s+(?=\d)", "", value)
+    return parse_number(value)
+
+
+def money_values_from_text(text: str) -> list[float]:
+    values: list[float] = []
+    amount_re = re.compile(
+        r"(?<![\w])("
+        r"\d{1,3}(?:[ '\u202f`]\d{3})+(?:[,.]\d{2})?"
+        r"|\d{4}\s+\d{3}(?:\s+\d{3})*(?:[,.]\d{2})?"
+        r"|\d{5,}(?:[,.]\d{2})"
+        r")(?![\w])"
+    )
+    for match in amount_re.finditer(clean_text(text)):
+        value = parse_amount_token(match.group(0))
+        if value is not None and 10_000 <= value <= 100_000_000:
+            values.append(value)
+    return values
+
+
+OCR_PRODUCT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("Блок ввода и узла учета тепловой энергии", re.compile(r"блок\s+ввода", re.IGNORECASE)),
+    ("Блок системы ГВС", re.compile(r"блок\s+системы\s+гвс", re.IGNORECASE)),
+    ("Блок системы отопления", re.compile(r"блок\s+системы\s+отоплен", re.IGNORECASE)),
+    ("Распределительная гребенка", re.compile(r"распределительн\w*\s+греб", re.IGNORECASE)),
+    ("Узел ввода", re.compile(r"\b(?:узел|ш)\s+ввода\b", re.IGNORECASE)),
+    ("Тепловой пункт системы ГВС", re.compile(r"(?:тепловой\s+)?пункт\s+системы\s+гвс", re.IGNORECASE)),
+    ("Тепловой пункт системы отопления", re.compile(r"(?:тепловой\s+)?пункт\s+системы\s+отоплен|тепловой\s+пункт.*?отоплен", re.IGNORECASE)),
+    ("Тепловой пункт линии подпитки", re.compile(r"(?:тепловой\s+)?пункт\s+линии\s+подпитки|линии\s+подпитки", re.IGNORECASE)),
+    ("Модульный коллектор", re.compile(r"модульн\w*|коллектор", re.IGNORECASE)),
+    ("Шкаф автоматизации", re.compile(r"шкаф\s+автоматизации|шкаф\b|автоматизации", re.IGNORECASE)),
+]
+
+
+def ocr_product_label(line: str) -> str | None:
+    clean = clean_text(line)
+    for label, pattern in OCR_PRODUCT_PATTERNS:
+        if pattern.search(clean):
+            return label
+    return None
+
+
+def has_ocr_product_marker(line: str) -> bool:
+    return ocr_product_label(line) is not None
+
+
+def ocr_label_near_amount(lines: list[str], idx: int) -> str | None:
+    for end in range(idx + 1, min(len(lines), idx + 4) + 1):
+        label = ocr_product_label(clean_text(" ".join(lines[idx:end])))
+        if label:
+            return label
+    for start in range(idx - 1, max(-1, idx - 3), -1):
+        label = ocr_product_label(clean_text(" ".join(lines[start : idx + 1])))
+        if label:
+            return label
+    return None
+
+
+def parse_structured_ocr_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    items: list[SupplierItem] = []
+    delivery = delivery_from_pdf_lines(lines)
+    clean_lines = [clean_text(line) for line in lines]
+    seen: set[tuple[str, int]] = set()
+
+    for idx, line in enumerate(clean_lines):
+        lower = line.lower()
+        if any(word in lower for word in ["итого", "всего", "ндс", "доставка", "реквизит", "кои"]):
+            continue
+        values = money_values_from_text(line)
+        if not values:
+            continue
+        label = ocr_label_near_amount(clean_lines, idx)
+        if not label:
+            continue
+        total = values[-1]
+        key = (label.lower(), round(total))
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(
+            SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=str(len(items) + 1),
+                name=label,
+                qty=1,
+                unit="шт",
+                price=total,
+                total=total,
+                delivery=delivery,
+                invoice_no=invoice_no,
+            )
+        )
+    return items
+
+
+def looks_like_product_text(text: str) -> bool:
+    lower = clean_text(text).lower()
+    markers = [
+        "блок",
+        "тепловой пункт",
+        "узел",
+        "гвс",
+        "отоплен",
+        "подпит",
+        "коллектор",
+        "шкаф",
+        "битп",
+        "ридан",
+        "ув-",
+        "бтп",
+        "ангар",
+    ]
+    return any(marker in lower for marker in markers)
+
+
+def clean_ocr_offer_name(text: str) -> str:
+    clean = clean_text(text)
+    clean = re.sub(r"\d(?:[\d\s'`]{2,})(?:[,.]\d{2})?", " ", clean)
+    clean = re.sub(r"[$ВB]?S?0?203260034[-\w/]*", " ", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"\b\d+\s*\|?", " ", clean)
+    clean = re.sub(r"\b(?:шт|руб|ндс|под заказ|вес|кг|недель)\b[:.]?", " ", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"[|\\[\\]{}]+", " ", clean)
+    clean = re.sub(r"\s+", " ", clean).strip(" .,:;-")
+    return clean
+
+
+def parse_fuzzy_ocr_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    structured_items = parse_structured_ocr_pdf(lines, path, supplier, invoice_no)
+    if structured_items:
+        return structured_items
+
+    items: list[SupplierItem] = []
+    delivery = delivery_from_pdf_lines(lines)
+    skip_words = ["итого", "всего", "ндс", "доставка", "стоимость доставки", "сумма", "реквизит"]
+    clean_lines = [clean_text(line) for line in lines]
+
+    for idx, line in enumerate(clean_lines):
+        lower = line.lower()
+        if any(word in lower for word in skip_words):
+            continue
+        values = money_values_from_text(line)
+        if not values:
+            continue
+
+        context_parts = []
+        for near_idx in range(max(0, idx - 2), min(len(clean_lines), idx + 3)):
+            near = clean_lines[near_idx]
+            near_lower = near.lower()
+            if any(word in near_lower for word in ["итого", "всего", "ндс", "реквизит"]):
+                continue
+            context_parts.append(near)
+        context = clean_text(" ".join(context_parts))
+        if not looks_like_product_text(context):
+            continue
+
+        name = clean_ocr_offer_name(context)
+        if len(name) < 8:
+            continue
+        total = values[-1]
+        price = values[0]
+        if total < 1000 or any(abs((offer.total or 0) - total) < 0.01 for offer in items):
+            continue
+        items.append(
+            SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=str(len(items) + 1),
+                name=name,
+                qty=1,
+                unit="шт",
+                price=price,
+                total=total,
+                delivery=delivery,
+                invoice_no=invoice_no,
+            )
+        )
+    return items
+
+
+def parse_sib_k_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    items: list[SupplierItem] = []
+    delivery = delivery_from_pdf_lines(lines)
+    for idx, line in enumerate(lines, start=1):
+        clean = clean_text(line)
+        match = re.search(
+            r"(?P<name>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё\s]+?)\s*[–—-]\s*(?P<amount>\d[\d\s]*(?:[,.]\d{2})?)\s*р",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        name = clean_text(match.group("name")).strip(" ,.;:")
+        total = parse_amount_token(match.group("amount"))
+        if not name or total is None:
+            continue
+        items.append(
+            SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=str(len(items) + 1),
+                name=name,
+                qty=1,
+                unit="шт",
+                price=total,
+                total=total,
+                delivery=delivery,
+                invoice_no=invoice_no,
+            )
+        )
+
+    if items:
+        return items
+
+    joined = clean_text(" ".join(lines))
+    total_match = re.search(r"за\s+(?P<amount>\d[\d\s]*(?:[,.]\d{2})?)\s*руб", joined, flags=re.IGNORECASE)
+    if total_match and "битп" in joined.lower():
+        total = parse_amount_token(total_match.group("amount"))
+        if total is not None:
+            return [
+                SupplierItem(
+                    supplier=supplier,
+                    source=path.name,
+                    row_no="1",
+                    name="БИТП в составе: блок отопления, блок ГВС, блок УУТЭ, блок распределительных гребенок, изоляционные материалы, материалы для соединения между блоками",
+                    qty=1,
+                    unit="компл",
+                    price=total,
+                    total=total,
+                    delivery=delivery,
+                    invoice_no=invoice_no,
+                )
+            ]
+    return []
+
+
+def is_ridan_continuation(line: str) -> bool:
+    clean = re.sub(r"\bкг\.?\b", " ", clean_text(line), flags=re.IGNORECASE)
+    if not clean:
+        return False
+    lower = clean.lower()
+    skip_markers = [
+        "всего",
+        "ндс",
+        "условия",
+        "срок:",
+        "под заказ",
+        "контакты",
+        "гарантия",
+        "цена указана",
+        "доставка",
+        "не для продажи",
+        "настоящего коммерческого",
+        "официальных партнеров",
+        "расчет выполнил",
+        "ответственный за объект",
+        "обратившись по тел",
+    ]
+    if any(marker in lower for marker in skip_markers):
+        return False
+    return bool(re.search(r"[A-Za-zА-Яа-яЁё]", clean))
+
+
+def clean_ridan_part(line: str) -> str:
+    clean = re.sub(r"\bкг\.?\b", " ", clean_text(line), flags=re.IGNORECASE)
+    clean = re.sub(r"\s+", " ", clean).strip(" ,.;:")
+    return clean
+
+
+def parse_ridan_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    items: list[SupplierItem] = []
+    delivery = delivery_from_pdf_lines(lines)
+    current: SupplierItem | None = None
+    row_pattern = re.compile(
+        r"^\s*(?P<row>\d+)\s+(?P<name>.+?)\s+"
+        r"(?P<article>[A-ZА-Я]{1,3}\d[\w/.\-]*)\s+"
+        r"(?P<price>\d[\d\s]*(?:[,.]\d{2})?)\s+"
+        r"(?P<qty>\d+(?:[,.]\d+)?)\s+"
+        r"(?P<total>\d[\d\s]*(?:[,.]\d{2})?)\b",
+        flags=re.IGNORECASE,
+    )
+
+    for line in lines:
+        clean = clean_text(line)
+        lower = clean.lower()
+        if "всего за товары" in lower or "для коммерческого предложения" in lower:
             break
+        match = row_pattern.match(clean)
+        if match:
+            if current:
+                items.append(current)
+            price = parse_amount_token(match.group("price"))
+            total = parse_amount_token(match.group("total"))
+            row_delivery = delivery
+            delivery_match = re.search(r"Срок:\s*([^:]+?)(?:\s+Вес|\s*$)", clean, flags=re.IGNORECASE)
+            if delivery_match:
+                row_delivery = clean_text(delivery_match.group(1))
+            current = SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=match.group("row"),
+                name=clean_ridan_part(match.group("name")),
+                qty=parse_quantity(match.group("qty"), price, total),
+                unit="шт",
+                price=price,
+                total=total,
+                delivery=row_delivery,
+                invoice_no=invoice_no,
+            )
+            continue
+        if current and is_ridan_continuation(clean):
+            part = clean_ridan_part(clean)
+            if part:
+                current.name = clean_text(current.name + " " + part)
+
+    if current:
+        items.append(current)
+    return items
+
+
+def parse_known_text_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    joined = clean_text(" ".join(lines)).lower()
+    if "ридан" in joined or "тепловой пункт" in joined:
+        items = parse_ridan_pdf(lines, path, supplier, invoice_no)
+        if items:
+            return items
+    if "сиб-к" in joined or "битп" in joined:
+        items = parse_sib_k_pdf(lines, path, supplier, invoice_no)
+        if items:
+            return items
+    return parse_fuzzy_ocr_pdf(lines, path, supplier, invoice_no)
+
+
+def configure_tesseract() -> str | None:
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    common_paths = [
+        Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+        Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+    ]
+    for candidate in common_paths:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def local_tessdata_dir() -> Path:
+    return Path(__file__).resolve().parent / ".tessdata"
+
+
+def tesseract_safe_path(path: Path) -> str:
+    resolved = str(path.resolve())
+    if os.name != "nt":
+        return resolved
+    buffer = ctypes.create_unicode_buffer(260)
+    result = ctypes.windll.kernel32.GetShortPathNameW(resolved, buffer, len(buffer))
+    if result:
+        return buffer.value
+    return resolved
+
+
+def available_tesseract_languages(tesseract_path: str) -> set[str]:
+    try:
+        import subprocess
+
+        tessdata_dir = local_tessdata_dir()
+        command = [tesseract_path]
+        if tessdata_dir.exists():
+            command.extend(["--tessdata-dir", tesseract_safe_path(tessdata_dir)])
+        command.append("--list-langs")
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return set()
+    return {
+        clean_text(line).strip()
+        for line in result.stdout.splitlines()
+        if clean_text(line).strip() and not line.lower().startswith("list of available")
+    }
+
+
+def ocr_pdf_lines(path: Path) -> list[str]:
+    try:
+        try:
+            import pymupdf as fitz  # type: ignore
+        except ModuleNotFoundError:
+            import fitz  # type: ignore
+        import pytesseract  # type: ignore
+        from PIL import Image
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            f"{path.name}: PDF похож на скан/картинку. Для OCR нужны Python-пакеты PyMuPDF и pytesseract."
+        ) from exc
+    if not hasattr(fitz, "open"):
+        raise RuntimeError(
+            f"{path.name}: OCR не смог открыть PDF, потому что установлен конфликтующий модуль fitz. "
+            "Переустановите PyMuPDF или запустите сервис через run_8001.bat."
+        )
+
+    tesseract_path = configure_tesseract()
+    if not tesseract_path:
+        raise RuntimeError(
+            f"{path.name}: PDF похож на скан/картинку. Для OCR установите Tesseract OCR с русским языком."
+        )
+    if hasattr(pytesseract, "pytesseract"):
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+    else:
+        pytesseract.tesseract_cmd = tesseract_path
+    languages = available_tesseract_languages(tesseract_path)
+    if "rus" in languages and "eng" in languages:
+        lang = "rus+eng"
+    elif "rus" in languages:
+        lang = "rus"
+    else:
+        lang = "eng"
+    config = "--psm 6"
+    tessdata_dir = local_tessdata_dir()
+    if tessdata_dir.exists():
+        config += f" --tessdata-dir {tesseract_safe_path(tessdata_dir)}"
+
+    lines: list[str] = []
+    with fitz.open(path) as doc:
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image = Image.open(io.BytesIO(pix.tobytes("png")))
+            text = pytesseract.image_to_string(image, lang=lang, config=config)
+            lines.extend(text.splitlines())
+    return lines
+
+
+def parse_layout_pdf(path: Path, supplier: str | None = None) -> list[SupplierItem]:
+    supplier = supplier or supplier_name_from_file(path)
+    lines = pdf_text_lines(path)
+    if not any(clean_text(line) for line in lines):
+        lines = ocr_pdf_lines(path)
+    invoice_no = invoice_no_from_text(" ".join(lines[:35]), path.name)
+
+    delivery = delivery_from_pdf_lines(lines)
 
     items: list[SupplierItem] = []
     in_table = False
@@ -1051,11 +1689,12 @@ def parse_layout_pdf(path: Path, supplier: str | None = None) -> list[SupplierIt
                 source=path.name,
                 row_no=match.group("row"),
                 name=clean_text(" ".join(name_parts)),
-                qty=parse_number(match.group("qty")),
+                qty=parse_quantity(match.group("qty"), price, total),
                 unit=clean_text(match.group("unit")),
                 price=price,
                 total=total,
                 delivery=delivery,
+                invoice_no=invoice_no,
             )
             pending = []
             continue
@@ -1067,7 +1706,9 @@ def parse_layout_pdf(path: Path, supplier: str | None = None) -> list[SupplierIt
 
     if current:
         items.append(current)
-    return items
+    if items:
+        return items
+    return parse_known_text_pdf(lines, path, supplier, invoice_no)
 
 
 def read_offer(path: Path, supplier: str | None = None) -> list[SupplierItem]:
@@ -1128,7 +1769,8 @@ def call_deepseek(payload: dict) -> dict | None:
                     "лист, рулон и упаковка могут соответствовать м2, если площадь указана в названии. "
                     "Если в названии указано количество в пачке/упаковке, умножай на количество упаковок и сравнивай в штуках. "
                     "Упаковки клея, смеси и сухих материалов сравнивай в кг, если указан вес упаковки. "
-                    "Доски, профиль, рейки, планки, каркас и брус сравнивай в погонных метрах, если указана длина. "
+                    "Пиломатериалы: доска, брус, рейка, лаги и стропила сравнивай в м3, если указаны размеры. "
+                    "Металлический профиль, планки и каркас сравнивай в погонных метрах, если указана длина. "
                     "Не сопоставляй разные бренды, если бренд принципиален. "
                     "Ответь только JSON без пояснений."
                 ),
@@ -1453,6 +2095,42 @@ def offer_total_value(offer: SupplierItem) -> float | None:
     return offer.price
 
 
+def fmt_price_value(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def normalized_unit_price(request: RequestItem, offer: SupplierItem) -> tuple[float | None, str | float | None]:
+    if offer.price is None:
+        return None, offer.price
+    converted_qty, converted_unit = converted_quantity(request, offer)
+    req_unit = normalized_unit(request.unit)
+    offer_unit = normalized_unit(offer.unit)
+    display: str | float | None = offer.price
+    if converted_unit == "m3" and is_lumber_text(f"{request.name} {offer.name}") and converted_qty is not None and offer.qty and converted_qty > 0:
+        factor = converted_qty / offer.qty
+        if factor > 0:
+            price = offer.price / factor
+            if offer_unit != "m3" or abs(factor - 1) > 0.0001:
+                display = f"{fmt_price_value(offer.price)}\n~ {fmt_price_value(price)}/м3".strip()
+            return price, display
+    if (
+        converted_qty is not None
+        and offer.qty
+        and converted_qty > 0
+        and converted_unit == req_unit
+    ):
+        factor = converted_qty / offer.qty
+        if factor > 0:
+            price = offer.price / factor
+            if req_unit != offer_unit or abs(factor - 1) > 0.0001:
+                unit_label = request.unit or converted_unit
+                display = f"{fmt_price_value(offer.price)}\n~ {fmt_price_value(price)}/{unit_label}".strip()
+            return price, display
+    return offer.price, display
+
+
 def write_final(path: Path, request_items: list[RequestItem], matches: list[Match]) -> None:
     wb = Workbook()
     ws = wb.active
@@ -1525,12 +2203,17 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         supplier_fill_by_name[supplier] = header_fill
         supplier_light_by_name[supplier] = light_fill
         ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col + 4)
-        ws.cell(1, col, supplier)
-        ws.cell(1, col).font = Font(bold=True, color="1F2933", size=12)
+        invoices = supplier_invoice_summary(supplier, matches)
+        header_text = supplier
+        if invoices:
+            header_text = f"{supplier}\nсчет/КП: {invoices}"
+        ws.cell(1, col, header_text)
+        ws.cell(1, col).font = Font(bold=True, color="1F2933", size=10)
+        ws.cell(1, col).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         style_range(1, 2, col, col + 4, header_fill)
         col += 5
 
-    ws.row_dimensions[1].height = 42
+    ws.row_dimensions[1].height = 52
     ws.row_dimensions[2].height = 42
     row = 3
     supplier_goods_totals = {supplier: 0.0 for supplier in suppliers}
@@ -1564,8 +2247,9 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     key=lambda item: (item.status != "manual", -(item.supplier_item.price or 0), -item.score),
                 )[0]
                 selected[supplier] = chosen
-                if chosen.supplier_item.price is not None:
-                    prices.append((supplier, chosen.supplier_item.price))
+                normalized_price, _ = normalized_unit_price(request, chosen.supplier_item)
+                if normalized_price is not None:
+                    prices.append((supplier, normalized_price))
                 supplier_goods_totals[supplier] += offer_total_value(chosen.supplier_item) or 0
 
         min_price = min((price for _, price in prices), default=None)
@@ -1590,15 +2274,16 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + 4)
             ws.cell(desc_row, start, offer.name)
             ws.cell(value_row, start, offer.row_no)
-            ws.cell(value_row, start + 1, offer.price)
+            normalized_price, price_display = normalized_unit_price(request, offer)
+            ws.cell(value_row, start + 1, price_display)
             qty_result = quantity_check(request, offer)
             ws.cell(value_row, start + 2, qty_result.display)
             ws.cell(value_row, start + 3, offer.total)
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
             qty_ok = qty_result.status == "ok"
-            if offer.price is not None and min_price is not None and abs(offer.price - min_price) < 0.0001:
+            if normalized_price is not None and min_price is not None and abs(normalized_price - min_price) < 0.0001:
                 ws.cell(value_row, start + 1).fill = green
-            if offer.price is not None and max_price is not None and abs(offer.price - max_price) < 0.0001 and max_price != min_price:
+            if normalized_price is not None and max_price is not None and abs(normalized_price - max_price) < 0.0001 and max_price != min_price:
                 ws.cell(value_row, start + 1).fill = red
             qty_cell = ws.cell(value_row, start + 2)
             if qty_result.status == "ok":
@@ -1725,42 +2410,44 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
 
     if unmatched:
         extra = wb.create_sheet("Не сопоставлено")
-        headers = ["Поставщик", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
+        headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
         extra.append(headers)
         for offer in unmatched:
-            extra.append([offer.supplier, offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
+            extra.append([offer.supplier, invoice_label(offer), offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
         style_sheet(extra)
         extra.column_dimensions["A"].width = 20
-        extra.column_dimensions["B"].width = 10
-        extra.column_dimensions["C"].width = 70
-        extra.column_dimensions["D"].width = 12
-        extra.column_dimensions["E"].width = 10
-        extra.column_dimensions["F"].width = 14
+        extra.column_dimensions["B"].width = 20
+        extra.column_dimensions["C"].width = 10
+        extra.column_dimensions["D"].width = 70
+        extra.column_dimensions["E"].width = 12
+        extra.column_dimensions["F"].width = 10
         extra.column_dimensions["G"].width = 14
-        extra.column_dimensions["H"].width = 24
+        extra.column_dimensions["H"].width = 14
+        extra.column_dimensions["I"].width = 24
         extra.freeze_panes = "A2"
-        for col_letter in ("F", "G"):
+        for col_letter in ("G", "H"):
             for cell in extra[col_letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
 
     if service_items:
         service = wb.create_sheet("Доставка и услуги")
-        headers = ["Поставщик", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
+        headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
         service.append(headers)
         for offer in service_items:
-            service.append([offer.supplier, offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
+            service.append([offer.supplier, invoice_label(offer), offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
         style_sheet(service)
         service.column_dimensions["A"].width = 20
-        service.column_dimensions["B"].width = 10
-        service.column_dimensions["C"].width = 70
-        service.column_dimensions["D"].width = 12
-        service.column_dimensions["E"].width = 10
-        service.column_dimensions["F"].width = 14
+        service.column_dimensions["B"].width = 20
+        service.column_dimensions["C"].width = 10
+        service.column_dimensions["D"].width = 70
+        service.column_dimensions["E"].width = 12
+        service.column_dimensions["F"].width = 10
         service.column_dimensions["G"].width = 14
-        service.column_dimensions["H"].width = 24
+        service.column_dimensions["H"].width = 14
+        service.column_dimensions["I"].width = 24
         service.freeze_panes = "A2"
-        for col_letter in ("F", "G"):
+        for col_letter in ("G", "H"):
             for cell in service[col_letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'

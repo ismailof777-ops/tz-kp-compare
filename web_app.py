@@ -991,6 +991,7 @@ def supplier_item_from_dict(data: dict) -> SupplierItem:
         price=data.get("price"),
         total=data.get("total"),
         delivery=clean_text(data.get("delivery")),
+        invoice_no=clean_text(data.get("invoice_no")),
     )
 
 
@@ -1051,8 +1052,7 @@ def top_request_suggestions(match: Match, request_items: list[RequestItem], limi
         score, _reason = match_score(item.name, match.supplier_item.name)
         if item.pos == match.request_pos:
             score = max(score, match.score)
-        if score >= 0.16 or item.pos == match.request_pos:
-            suggestions.append((item, score))
+        suggestions.append((item, score))
     suggestions.sort(key=lambda pair: pair[1], reverse=True)
     return suggestions[:limit]
 
@@ -1419,12 +1419,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 for idx, offer_path in enumerate(offer_paths, start=1):
                     update_progress(12 + round((idx - 1) / max(1, len(offer_paths)) * 24), f"Извлекаем позиции КП: файл {idx} из {len(offer_paths)}")
                     try:
-                        supplier_items.extend(read_offer(offer_path))
+                        parsed_items = read_offer(offer_path)
+                        if parsed_items:
+                            supplier_items.extend(parsed_items)
+                        else:
+                            errors.append(f"{offer_path.name}: позиции КП не найдены. Возможно, это скан или нестандартный PDF.")
                     except Exception as exc:  # noqa: BLE001
                         errors.append(str(exc))
 
                 if not supplier_items:
-                    raise ValueError("Не удалось извлечь позиции КП. Проверьте форматы файлов.")
+                    details = " ".join(errors[:5])
+                    raise ValueError(f"Не удалось извлечь позиции КП. {details}".strip())
 
                 update_progress(42, "Сопоставляем товары по названиям, синонимам и единицам")
                 matches = build_matches(request_items, supplier_items, progress_callback=update_ai_progress)
@@ -1570,7 +1575,10 @@ class AppHandler(BaseHTTPRequestHandler):
             self.wfile.write(data)
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002
-        sys.stderr.write("%s - %s\n" % (self.address_string(), format % args))
+        try:
+            sys.stderr.write("%s - %s\n" % (self.address_string(), format % args))
+        except Exception:
+            pass
 
 
 def main() -> None:

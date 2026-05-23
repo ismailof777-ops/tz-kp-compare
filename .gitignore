@@ -12,3 +12,5 @@ Gmail.zip
 .env
 .venv/
 venv/
+.python_packages/
+.tessdata/

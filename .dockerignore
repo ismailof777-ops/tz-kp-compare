@@ -1,0 +1,14 @@
+.git
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+.python_packages/
+.tessdata/
+outputs/
+extracted/
+Gmail.zip
+*.jpg
+*.jpeg
+*.png

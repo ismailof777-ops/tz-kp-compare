@@ -4,3 +4,16 @@ services:
     env: docker
     plan: free
     autoDeploy: true
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_BASE
+        value: https://api.deepseek.com
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: DEEPSEEK_AI_SCOPE
+        value: all
+      - key: DEEPSEEK_MAX_AI_ROWS
+        value: "300"
+      - key: DEEPSEEK_BATCH_SIZE
+        value: "20"

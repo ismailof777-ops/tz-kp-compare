@@ -266,20 +266,27 @@ input[type="text"],
 input[type="search"] {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 12px;
   background: #fff;
-  padding: 10px 11px;
-  min-height: 42px;
+  padding: 11px 12px;
+  min-height: 44px;
+  color: var(--text);
+  outline: none;
 }
 select,
 input[type="text"],
 input[type="search"] { font: inherit; }
+select:focus,
+input[type="text"]:focus,
+input[type="search"]:focus {
+  border-color: #99f6e4;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
+}
 .match-input {
   min-width: 300px;
   text-overflow: ellipsis;
 }
 .match-help {
-  margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -291,40 +298,44 @@ input[type="search"] { font: inherit; }
   margin-top: 7px;
 }
 .clear-match {
-  border: 1px solid #f2b9b7;
-  border-radius: 5px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
   background: #fff7f7;
-  color: #8a2420;
-  padding: 4px 7px;
-  font-size: 11px;
+  color: #991b1b;
+  padding: 6px 10px;
+  font-size: 12px;
   line-height: 1.2;
+  font-weight: 700;
   cursor: pointer;
 }
 .clear-match:hover {
-  background: #fdeaea;
+  background: #fee2e2;
 }
 .suggestions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 10px;
 }
 .suggestion {
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-soft);
-  color: #344054;
-  padding: 5px 8px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
+  padding: 7px 10px;
   font-size: 12px;
   line-height: 1.2;
+  font-weight: 700;
   cursor: pointer;
 }
 .suggestion-label {
   color: var(--muted);
+  font-weight: 600;
 }
 .suggestion:hover {
-  border-color: #9fb3c8;
-  background: #eef4fa;
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: var(--accent-strong);
 }
 .with-tooltip {
   cursor: help;
@@ -665,43 +676,47 @@ a:hover {
 .review-summary {
   display: grid;
   grid-template-columns: repeat(7, minmax(112px, 1fr));
-  gap: 10px;
-  margin: 4px 0 16px;
+  gap: 12px;
+  margin: 4px 0 18px;
 }
 .summary-item {
   display: grid;
-  gap: 4px;
-  min-height: 64px;
+  gap: 8px;
+  min-height: 86px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 18px;
   background: #fff;
-  padding: 10px 11px;
+  padding: 14px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
+  box-shadow: var(--shadow-soft);
 }
 .summary-item b {
   color: var(--text);
-  font-size: 20px;
+  font-size: 24px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .summary-item.attention {
-  border-color: #efd07a;
-  background: #fffaf0;
+  border-color: #fde68a;
+  background: #fffbeb;
 }
 .summary-item.primary {
-  border-color: #9cced6;
-  background: #f0fbfc;
+  border-color: #99f6e4;
+  background: #f0fdfa;
 }
 .notice {
-  border-radius: 6px;
+  border-radius: 16px;
   border: 1px solid var(--line);
-  padding: 12px 14px;
-  margin-bottom: 16px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
   background: #fff;
+  color: var(--muted);
+  box-shadow: var(--shadow-soft);
 }
-.notice.warn { border-color: #f4c76d; background: #fff8e6; }
-.notice.error { border-color: #eda5a3; background: #fff0f0; }
+.notice.warn { border-color: #fde68a; background: #fffbeb; color: #854d0e; }
+.notice.error { border-color: #fecaca; background: #fff1f2; color: #991b1b; }
 .legal-page {
   max-width: 920px;
   margin: 0 auto;
@@ -789,11 +804,85 @@ a:hover {
   font-size: 13px;
 }
 .table-wrap {
+  width: 100%;
+  max-width: 100%;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 20px;
   background: #fff;
-  box-shadow: 0 8px 22px rgba(16, 24, 40, 0.05);
+  box-shadow: var(--shadow);
+}
+.review-form {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.review-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #fff;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+.review-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.review-card-head h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.review-card-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.review-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 999px;
+  background: #f0fdfa;
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+}
+.review-actionbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.review-actionbar .actions {
+  margin-top: 0;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.action-copy {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.action-copy b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text);
+  font-size: 14px;
 }
 .review-tools {
   display: grid;
@@ -820,26 +909,34 @@ a:hover {
 .summary-item b {
   font-family: var(--font-mono);
 }
+.summary-item b {
+  font-family: var(--font-sans);
+}
 table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 980px;
+  min-width: 1080px;
   font-size: 13px;
 }
 th, td {
   border-bottom: 1px solid var(--line);
-  padding: 11px 10px;
+  padding: 14px 12px;
   text-align: left;
   vertical-align: top;
 }
 th {
   position: sticky;
   top: 0;
-  background: #edf5f7;
+  background: #f8fafc;
   z-index: 1;
   font-size: 12px;
-  color: #344054;
-  font-weight: 700;
+  color: #475569;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+tbody tr:hover td {
+  background: #f8fafc;
 }
 td.small, th.small { width: 118px; }
 .review-table th:nth-child(1),
@@ -859,25 +956,27 @@ td.small, th.small { width: 118px; }
   width: 390px;
   min-width: 390px;
   background: #fff;
-  box-shadow: 8px 0 12px rgba(16, 24, 40, 0.06);
+  box-shadow: 10px 0 18px rgba(15, 23, 42, 0.05);
 }
 .review-table th:nth-child(1),
 .review-table th:nth-child(2) {
   z-index: 4;
-  background: #edf5f7;
+  background: #f8fafc;
 }
 .review-table .match-input {
   min-width: 0;
 }
 .status {
-  display: inline-block;
-  max-width: 112px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 126px;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 4px 6px;
+  padding: 6px 9px;
   font-size: 11px;
   line-height: 1.2;
-  font-weight: 700;
+  font-weight: 800;
   text-align: center;
 }
 .status.review { background: #fff6d8; border-color: #f1d88d; color: #6f5200; }
@@ -890,6 +989,16 @@ td.small, th.small { width: 118px; }
 .empty {
   padding: 26px;
   text-align: center;
+  color: var(--muted);
+}
+.empty h2 {
+  margin: 12px 0 6px;
+  color: var(--text);
+  font-size: 22px;
+}
+.empty p {
+  margin: 0 auto;
+  max-width: 620px;
   color: var(--muted);
 }
 .ready-panel {
@@ -1037,21 +1146,34 @@ td.small, th.small { width: 118px; }
 .summary-help {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0 0 16px;
+  gap: 12px;
+  margin: 0 0 18px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.55;
 }
 .summary-help div {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 18px;
   background: #fff;
-  padding: 9px 10px;
+  padding: 14px;
+  box-shadow: var(--shadow-soft);
 }
 .summary-help b {
   color: var(--text);
   font-weight: 700;
+}
+@media (max-width: 1180px) {
+  .review-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .review-actionbar {
+    grid-template-columns: 1fr;
+  }
+  .review-actionbar .actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 @media (max-width: 840px) {
   .site-header { width: min(100% - 24px, 1180px); padding-top: 14px; }
@@ -1083,6 +1205,18 @@ td.small, th.small { width: 118px; }
   .summary-help { grid-template-columns: 1fr; }
   .review-tools { grid-template-columns: 1fr; }
   .review-count { padding-bottom: 0; }
+  .review-card { padding: 16px; border-radius: 18px; }
+  .review-card-head,
+  .review-actionbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .review-actionbar .actions {
+    justify-content: stretch;
+  }
+  .review-badge {
+    width: fit-content;
+  }
   h1 { font-size: 30px; }
   .subtitle { font-size: 15px; }
   .btn { width: 100%; }
@@ -1802,40 +1936,65 @@ def render_review(run_id: str) -> bytes:
 
     if rows_html:
         review_html = f"""
-<form action="/finalize/{esc(run_id)}" method="post">
+<form class="review-form" action="/finalize/{esc(run_id)}" method="post">
   <datalist id="request-options">
     {request_options}
   </datalist>
-  <div class="notice warn">Для спорных строк подтвердите предложенную позицию заявки или выберите один из вариантов ниже. Процент рядом с вариантом показывает, насколько позиция КП похожа на позицию заявки.</div>
-  <div class="table-wrap">
-    <table class="review-table">
-      <thead>
-        <tr>
-          <th class="small">Статус</th>
-          <th>Позиция заявки</th>
-          <th>Поставщик</th>
-          <th class="small">Строка</th>
-          <th>Позиция КП</th>
-          <th class="small">Кол-во</th>
-          <th class="small">Цена</th>
-          <th>Причина</th>
-        </tr>
-      </thead>
-      <tbody>{rows_html}</tbody>
-    </table>
+  <div class="review-card">
+    <div class="review-card-head">
+      <div>
+        <h2>Строки для проверки</h2>
+        <p>Подтвердите предложенную позицию заявки или выберите подходящий вариант из подсказок под полем.</p>
+      </div>
+      <span class="review-badge">{len(review_rows)} к проверке</span>
+    </div>
+    <div class="notice warn">Процент рядом с подсказкой показывает похожесть позиции КП на позицию заявки. Слабые совпадения отправляются на проверку, а не подтверждаются автоматически.</div>
+    <div class="table-wrap">
+      <table class="review-table">
+        <thead>
+          <tr>
+            <th class="small">Статус</th>
+            <th>Позиция заявки</th>
+            <th>Поставщик</th>
+            <th class="small">Строка</th>
+            <th>Позиция КП</th>
+            <th class="small">Кол-во</th>
+            <th class="small">Цена</th>
+            <th>Причина</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+      </table>
+    </div>
   </div>
-  <div class="actions">
-    <button class="btn" type="submit">Сформировать Excel</button>
-    <a class="btn secondary" href="/download/{esc(run_id)}/review.xlsx" download>Скачать файл проверки</a>
-    <a class="btn secondary" href="/">Новая обработка</a>
+  <div class="review-actionbar">
+    <div class="action-copy">
+      <b>После проверки будет сформирован итоговый Excel-отчет</b>
+      Сервис применит ручные правки, сохранит спорные решения и пересоберет сводку по поставщикам.
+    </div>
+    <div class="actions">
+      <button class="btn" type="submit">Сформировать Excel-отчет</button>
+      <a class="btn secondary" href="/download/{esc(run_id)}/review.xlsx" download>Скачать файл проверки</a>
+      <a class="btn secondary" href="/">Новая обработка</a>
+    </div>
   </div>
 </form>"""
     else:
         review_html = f"""
-<div class="panel empty">Спорных строк нет. Можно сразу скачать итоговый Excel.</div>
-<div class="actions">
-  <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать Excel</a>
-  <a class="btn secondary" href="/">Новая обработка</a>
+<div class="review-card empty">
+  <span class="ready-badge">Готово</span>
+  <h2>Спорных строк нет</h2>
+  <p>Все товарные позиции сопоставлены автоматически. Можно сразу скачать итоговый Excel-отчет.</p>
+</div>
+<div class="review-actionbar">
+  <div class="action-copy">
+    <b>Excel-отчет готов к скачиванию</b>
+    Итоговая сводка уже сформирована по данным заявки и КП поставщиков.
+  </div>
+  <div class="actions">
+    <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать Excel-отчет</a>
+    <a class="btn secondary" href="/">Новая обработка</a>
+  </div>
 </div>"""
 
     body = f"""

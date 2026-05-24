@@ -938,42 +938,65 @@ td.small, th.small { width: 118px; }
 }
 .processing {
   display: none;
-  margin-top: 16px;
-  border: 1px solid #b9dce3;
-  border-radius: 8px;
-  background: #f1fbfc;
-  padding: 14px;
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-soft);
+  padding: 18px;
+  box-shadow: var(--shadow-soft);
 }
 .processing.is-visible { display: block; }
 .processing-head {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
+  gap: 14px;
+  margin-bottom: 14px;
   font-weight: 700;
 }
+.processing-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.processing-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: #dff7f3;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+}
 .processing-head span {
-  color: var(--muted);
-  font-weight: 400;
+  color: var(--accent);
+  font-weight: 800;
 }
 .progress {
   overflow: hidden;
-  height: 9px;
+  height: 10px;
   border-radius: 999px;
-  background: #d6eaee;
+  background: #dbeafe;
 }
 .progress-bar {
   width: 0%;
   height: 100%;
   border-radius: 999px;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), #14b8a6);
   transition: width .25s ease;
 }
 .processing-note {
-  margin-top: 9px;
+  margin-top: 12px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.processing-note[data-processing-message] {
+  color: var(--text);
+  font-weight: 600;
 }
 .ai-progress {
   display: none;
@@ -1706,12 +1729,15 @@ def render_home(error: str = "") -> bytes:
     <div class="notice error" data-form-message style="display:none; margin-top:12px; margin-bottom:0"></div>
     <div class="processing" data-processing>
       <div class="processing-head">
-        <strong>Обработка с применением технологий ИИ</strong>
+        <div class="processing-title">
+          <span class="processing-icon">↻</span>
+          <strong>Формирование Excel-отчета</strong>
+        </div>
         <span data-processing-percent>0%</span>
       </div>
       <div class="progress"><div class="progress-bar" data-processing-fill></div></div>
       <div class="processing-note" data-processing-message>Загружаем файлы и готовим их к распознаванию.</div>
-      <div class="processing-note">Сервис извлекает позиции, цены и сроки, затем сопоставляет товары с учетом ИИ. Это может занять несколько минут, если файлов много или PDF большой.</div>
+      <div class="processing-note">Сервис извлекает позиции, цены и сроки, затем сопоставляет товары с учетом ИИ. Если файлов много или PDF большой, обработка может занять несколько минут.</div>
     </div>
   </form>
 </section>

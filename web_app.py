@@ -421,6 +421,12 @@ a:hover {
   text-decoration: none;
   cursor: pointer;
 }
+.btn,
+.btn:visited,
+.btn:hover,
+.btn:focus {
+  color: #fff;
+}
 .btn:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 .btn[disabled] {
   cursor: wait;
@@ -428,6 +434,12 @@ a:hover {
 }
 .btn.secondary {
   background: #fff;
+  color: var(--accent);
+}
+.btn.secondary,
+.btn.secondary:visited,
+.btn.secondary:hover,
+.btn.secondary:focus {
   color: var(--accent);
 }
 .btn.secondary:hover { background: var(--accent-soft); }

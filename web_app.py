@@ -49,16 +49,21 @@ class UploadedFile:
 CSS = """
 :root {
   color-scheme: light;
-  --bg: #f6f8fb;
+  --bg: #f4f7f9;
   --panel: #ffffff;
-  --text: #172033;
+  --panel-soft: #f8fafb;
+  --text: #101828;
   --muted: #667085;
-  --line: #d9e0ea;
-  --accent: #176b87;
-  --accent-strong: #0f566c;
-  --green: #d9f2df;
-  --red: #f9d6d5;
-  --yellow: #fff2c6;
+  --line: #d7dee7;
+  --line-strong: #b9c7d5;
+  --accent: #0f6f7d;
+  --accent-strong: #0a5561;
+  --accent-soft: #e8f5f7;
+  --green: #e5f6eb;
+  --red: #fdeceb;
+  --yellow: #fff6d6;
+  --shadow: 0 18px 42px rgba(16, 24, 40, 0.08);
+  --font-sans: "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 * { box-sizing: border-box; }
@@ -70,82 +75,91 @@ textarea {
 }
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    linear-gradient(180deg, #eef5f7 0, rgba(238, 245, 247, 0) 360px),
+    var(--bg);
   color: var(--text);
-  font: 14px/1.45 var(--font-mono);
+  font: 14px/1.5 var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
 .shell {
-  width: min(1180px, calc(100% - 32px));
+  width: min(1200px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 28px 0 40px;
+  padding: 34px 0 44px;
 }
 .topbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 h1 {
   margin: 0;
-  font-size: 24px;
-  line-height: 1.15;
+  font-size: 30px;
+  line-height: 1.12;
   letter-spacing: 0;
 }
 .subtitle {
-  margin: 7px 0 0;
+  margin: 9px 0 0;
   color: var(--muted);
-  max-width: 760px;
+  max-width: 720px;
+  font-size: 15px;
+}
+.home-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(460px, 1.1fr);
+  gap: 20px;
+  align-items: start;
 }
 .product-intro {
-  max-width: 920px;
-  margin-bottom: 16px;
-  padding: 18px;
+  min-height: 100%;
+  padding: 24px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 10px 24px rgba(16, 24, 40, 0.05);
+  box-shadow: var(--shadow);
 }
 .product-intro h2 {
   margin: 0;
-  font-size: 20px;
-  line-height: 1.25;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0;
 }
 .product-intro p {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   color: var(--muted);
-  max-width: 760px;
+  max-width: 620px;
+  font-size: 15px;
 }
 .intro-points {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
 }
 .intro-point {
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #fbfcfe;
-  padding: 7px 11px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 11px 12px;
   color: var(--muted);
   font-size: 13px;
 }
 .intro-point b {
-  display: inline;
-  margin: 0;
+  display: block;
+  margin: 0 0 2px;
   color: var(--text);
 }
 .intro-point span {
-  display: inline;
+  display: block;
   color: var(--muted);
 }
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 18px;
-  box-shadow: 0 10px 24px rgba(16, 24, 40, 0.05);
+  padding: 22px;
+  box-shadow: var(--shadow);
 }
 .grid {
   display: grid;
@@ -153,13 +167,13 @@ h1 {
   gap: 16px;
 }
 .upload-panel {
-  max-width: 920px;
+  width: 100%;
 }
-.field { margin-bottom: 16px; }
+.field { margin-bottom: 18px; }
 label {
   display: block;
   font-weight: 700;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 select,
 input[type="text"],
@@ -168,7 +182,7 @@ input[type="search"] {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
-  padding: 10px;
+  padding: 10px 11px;
   min-height: 42px;
 }
 select,
@@ -210,12 +224,12 @@ input[type="search"] { font: inherit; }
   margin-top: 8px;
 }
 .suggestion {
-  border: 1px solid #d9e0ea;
-  border-radius: 5px;
-  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
   color: #344054;
-  padding: 4px 7px;
-  font-size: 11px;
+  padding: 5px 8px;
+  font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
 }
@@ -234,20 +248,20 @@ input[type="search"] { font: inherit; }
   overflow: hidden;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 14px;
   align-items: center;
-  min-height: 86px;
-  border: 1px dashed #aebdca;
+  min-height: 112px;
+  border: 1px dashed var(--line-strong);
   border-radius: 8px;
-  background: #fbfcfe;
-  padding: 14px;
+  background: var(--panel-soft);
+  padding: 16px;
   transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .file-drop:hover,
 .file-drop.is-dragover {
   border-color: var(--accent);
-  background: #f0f8fb;
-  box-shadow: 0 0 0 3px rgba(23, 107, 135, 0.08);
+  background: #f2fbfc;
+  box-shadow: 0 0 0 4px rgba(15, 111, 125, 0.09);
 }
 .file-input {
   position: absolute;
@@ -267,18 +281,19 @@ input[type="search"] { font: inherit; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
-  background: #e8f4f8;
+  background: var(--accent-soft);
   color: var(--accent);
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
   font-weight: 700;
 }
 .file-title {
   display: block;
   font-weight: 700;
+  font-size: 15px;
 }
 .file-subtitle {
   display: block;
@@ -311,7 +326,7 @@ input[type="search"] { font: inherit; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin: 2px 0;
+  margin: 4px 0;
   padding: 5px 6px 5px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -346,9 +361,13 @@ input[type="search"] { font: inherit; }
   display: flex;
   gap: 9px;
   align-items: flex-start;
-  margin: 4px 0 14px;
+  margin: 4px 0 16px;
   color: var(--text);
   font-size: 13px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
 }
 .consent-field input {
   flex: 0 0 auto;
@@ -367,18 +386,19 @@ a:hover {
   color: var(--accent-strong);
 }
 .format-note {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
-  margin: 2px 0 16px;
+  margin: 0 0 18px;
 }
 .pill {
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 5px 9px;
+  border-radius: 8px;
+  padding: 9px 10px;
   color: var(--muted);
-  background: #fbfcfe;
+  background: var(--panel-soft);
   font-size: 12px;
+  text-align: center;
 }
 .actions {
   display: flex;
@@ -391,8 +411,8 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  padding: 0 15px;
+  min-height: 42px;
+  padding: 0 16px;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent);
@@ -410,7 +430,7 @@ a:hover {
   background: #fff;
   color: var(--accent);
 }
-.btn.secondary:hover { background: #eef8fb; }
+.btn.secondary:hover { background: var(--accent-soft); }
 .btn.stop {
   display: none;
   border-color: #d79c99;
@@ -422,39 +442,40 @@ a:hover {
 }
 .btn.stop:hover { background: #fff0f0; }
 .review-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 14px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(112px, 1fr));
+  gap: 10px;
+  margin: 4px 0 16px;
 }
 .summary-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-height: 32px;
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: #fff;
-  padding: 5px 10px;
+  padding: 10px 11px;
   color: var(--muted);
-  font-size: 13px;
-  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .summary-item b {
   color: var(--text);
-  font-size: 16px;
+  font-size: 20px;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .summary-item.attention {
-  border-color: var(--line);
-  background: #fff;
-  color: var(--muted);
+  border-color: #efd07a;
+  background: #fffaf0;
+}
+.summary-item.primary {
+  border-color: #9cced6;
+  background: #f0fbfc;
 }
 .notice {
   border-radius: 6px;
   border: 1px solid var(--line);
-  padding: 12px;
+  padding: 12px 14px;
   margin-bottom: 16px;
   background: #fff;
 }
@@ -462,32 +483,47 @@ a:hover {
 .notice.error { border-color: #eda5a3; background: #fff0f0; }
 .legal-page {
   max-width: 920px;
+  margin: 0 auto;
 }
 .legal-page h2 {
   margin: 0 0 12px;
   font-size: 18px;
 }
 .legal-page h3 {
-  margin: 18px 0 7px;
+  margin: 22px 0 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
   font-size: 15px;
+}
+.legal-page h2 + p,
+.legal-page h3:first-of-type {
+  border-top: 0;
+  padding-top: 0;
 }
 .legal-page p,
 .legal-page li {
   color: var(--muted);
+  line-height: 1.65;
 }
 .legal-page ul {
   margin: 8px 0 0;
   padding-left: 20px;
 }
 .site-footer {
-  width: min(1180px, calc(100% - 32px));
-  margin: -22px auto 0;
-  padding: 0 0 28px;
+  width: min(1200px, calc(100% - 40px));
+  margin: -18px auto 0;
+  padding: 0 0 30px;
   color: var(--muted);
   font-size: 13px;
   display: flex;
   gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
+}
+.site-footer span::after {
+  content: "·";
+  margin-left: 10px;
+  color: #98a2b3;
 }
 .cookie-banner {
   position: fixed;
@@ -501,11 +537,11 @@ a:hover {
   gap: 14px;
   max-width: 920px;
   margin: 0 auto;
-  padding: 14px;
+  padding: 13px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 14px 32px rgba(16, 24, 40, 0.16);
+  box-shadow: 0 16px 36px rgba(16, 24, 40, 0.14);
 }
 .cookie-banner.is-visible {
   display: flex;
@@ -536,6 +572,7 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+  box-shadow: 0 8px 22px rgba(16, 24, 40, 0.05);
 }
 .review-tools {
   display: grid;
@@ -552,23 +589,36 @@ a:hover {
   font-size: 13px;
   padding-bottom: 11px;
 }
+.review-table {
+  font-family: var(--font-sans);
+}
+.review-table td.small,
+.review-table th.small,
+.review-table .match-help,
+.review-table .suggestion,
+.summary-item b {
+  font-family: var(--font-mono);
+}
 table {
   border-collapse: collapse;
   width: 100%;
   min-width: 980px;
+  font-size: 13px;
 }
 th, td {
   border-bottom: 1px solid var(--line);
-  padding: 10px;
+  padding: 11px 10px;
   text-align: left;
   vertical-align: top;
 }
 th {
   position: sticky;
   top: 0;
-  background: #eaf3f8;
+  background: #edf5f7;
   z-index: 1;
-  font-size: 13px;
+  font-size: 12px;
+  color: #344054;
+  font-weight: 700;
 }
 td.small, th.small { width: 118px; }
 .review-table th:nth-child(1),
@@ -593,7 +643,7 @@ td.small, th.small { width: 118px; }
 .review-table th:nth-child(1),
 .review-table th:nth-child(2) {
   z-index: 4;
-  background: #eaf3f8;
+  background: #edf5f7;
 }
 .review-table .match-input {
   min-width: 0;
@@ -602,7 +652,7 @@ td.small, th.small { width: 118px; }
   display: inline-block;
   max-width: 112px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 999px;
   padding: 4px 6px;
   font-size: 11px;
   line-height: 1.2;
@@ -624,9 +674,9 @@ td.small, th.small { width: 118px; }
 .processing {
   display: none;
   margin-top: 16px;
-  border: 1px solid #b8d6e2;
+  border: 1px solid #b9dce3;
   border-radius: 8px;
-  background: #f1fbff;
+  background: #f1fbfc;
   padding: 14px;
 }
 .processing.is-visible { display: block; }
@@ -645,7 +695,7 @@ td.small, th.small { width: 118px; }
   overflow: hidden;
   height: 9px;
   border-radius: 999px;
-  background: #d5e8ef;
+  background: #d6eaee;
 }
 .progress-bar {
   width: 0%;
@@ -664,9 +714,9 @@ td.small, th.small { width: 118px; }
   display: none;
   width: min(520px, 100%);
   margin-top: 12px;
-  border: 1px solid #b8d6e2;
+  border: 1px solid #b9dce3;
   border-radius: 8px;
-  background: #f1fbff;
+  background: #f1fbfc;
   padding: 12px;
 }
 .ai-progress.is-visible { display: block; }
@@ -698,23 +748,32 @@ td.small, th.small { width: 118px; }
 }
 .summary-help {
   display: grid;
-  gap: 6px;
-  margin: -4px 0 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+.summary-help div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
 }
 .summary-help b {
   color: var(--text);
   font-weight: 700;
 }
 @media (max-width: 840px) {
-  .shell { width: min(100% - 20px, 1180px); padding-top: 18px; }
-  .topbar, .grid { display: block; }
+  .shell { width: min(100% - 20px, 1180px); padding-top: 20px; }
+  .topbar, .grid, .home-layout { display: block; }
   .upload-panel { max-width: none; }
   .panel { padding: 14px; }
-  .product-intro { padding: 14px; }
+  .product-intro { padding: 16px; margin-bottom: 14px; }
+  .product-intro h2 { font-size: 20px; }
   .intro-points { display: flex; }
+  .format-note { grid-template-columns: 1fr; }
   .cookie-banner {
     align-items: stretch;
     flex-direction: column;
@@ -722,12 +781,13 @@ td.small, th.small { width: 118px; }
   .cookie-actions .btn {
     flex: 1 1 130px;
   }
-  .review-summary { align-items: stretch; }
-  .summary-item { flex: 1 1 145px; justify-content: center; }
+  .review-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-help { grid-template-columns: 1fr; }
   .review-tools { grid-template-columns: 1fr; }
   .review-count { padding-bottom: 0; }
-  h1 { font-size: 21px; }
+  h1 { font-size: 24px; }
   .btn { width: 100%; }
+  .site-footer { width: min(100% - 20px, 1180px); }
 }
 """
 
@@ -1247,31 +1307,33 @@ def render_home(error: str = "") -> bytes:
     body = f"""
 <div class="topbar">
   <div>
-    <h1>Сравнение заявки и КП</h1>
+    <h1>Сравнение ТЗ и КП поставщиков</h1>
+    <p class="subtitle">Загрузите заявку и коммерческие предложения. Сервис сопоставит позиции, выделит спорные строки и сформирует Excel-сводку.</p>
   </div>
 </div>
 {error_html}
+<section class="home-layout">
 <section class="product-intro">
-  <h2>Сервис сравнивает заявку с КП поставщиков и собирает итоговую Excel-сводку.</h2>
-  <p>Загрузите ТЗ/заявку и счета поставщиков. Система найдет совпадающие позиции, покажет спорные строки для проверки и выделит лучшие и худшие цены в готовом отчете.</p>
+  <h2>Аккуратная сводка по ценам без ручного сведения таблиц.</h2>
+  <p>Инструмент извлекает позиции из заявок, КП и счетов, находит совпадения и оставляет спорные строки на ручное подтверждение.</p>
   <div class="intro-points">
-    <div class="intro-point"><b>Сопоставление:</b> <span>заявка и КП</span></div>
-    <div class="intro-point"><b>Проверка:</b> <span>спорные строки</span></div>
-    <div class="intro-point"><b>Excel:</b> <span>цены, сроки, подсветка</span></div>
+    <div class="intro-point"><b>Сопоставление</b> <span>Заявка, ТЗ, КП и счета в одном сценарии.</span></div>
+    <div class="intro-point"><b>Контроль</b> <span>Сомнительные совпадения попадают на проверку перед отчетом.</span></div>
+    <div class="intro-point"><b>Excel-результат</b> <span>Поставщики, цены, сроки, услуги и подсветка минимумов.</span></div>
   </div>
 </section>
 <section class="grid">
   <form class="panel upload-panel" action="/process" method="post" enctype="multipart/form-data" data-upload-form novalidate>
     <div class="format-note">
-      <span class="pill">Заявка: .xlsx</span>
-      <span class="pill">КП: .xlsx или текстовый .pdf</span>
-      <span class="pill">На выходе: Excel-сводка</span>
+      <span class="pill">Заявка XLSX</span>
+      <span class="pill">КП XLSX/PDF</span>
+      <span class="pill">Excel-отчет</span>
     </div>
     <div class="field">
       <label for="request">Заявка / ТЗ (.xlsx)</label>
       <div class="file-drop" data-drop-zone>
         <input class="file-input" id="request" name="request" type="file" accept=".xlsx" required>
-        <span class="file-icon">+</span>
+        <span class="file-icon">↑</span>
         <div>
           <span class="file-title">Перетащите файл заявки сюда</span>
           <span class="file-subtitle">или нажмите, чтобы выбрать .xlsx на компьютере</span>
@@ -1284,7 +1346,7 @@ def render_home(error: str = "") -> bytes:
       <label for="offers">КП / счета поставщиков (.xlsx, .pdf)</label>
       <div class="file-drop" data-drop-zone>
         <input class="file-input" id="offers" name="offers" type="file" accept=".xlsx,.pdf,.xls" multiple required>
-        <span class="file-icon">+</span>
+        <span class="file-icon">↑</span>
         <div>
           <span class="file-title">Перетащите КП или счета сюда</span>
           <span class="file-subtitle">или нажмите, чтобы выбрать несколько файлов</span>
@@ -1312,6 +1374,7 @@ def render_home(error: str = "") -> bytes:
       <div class="processing-note">Сервис извлекает позиции, цены и сроки, затем сопоставляет товары с учетом ИИ. Это может занять несколько минут, если файлов много или PDF большой.</div>
     </div>
   </form>
+</section>
 </section>
 """
     return page("Сравнение заявки и КП", body)
@@ -1421,7 +1484,7 @@ def render_review(run_id: str) -> bytes:
   <div class="summary-item"><span>Заявка</span><b>{stats["request"]}</b></div>
   <div class="summary-item"><span>КП</span><b>{stats["offers"]}</b></div>
   <div class="summary-item"><span>Товарные</span><b>{stats["comparable"]}</b></div>
-  <div class="summary-item"><span>Сопоставлено</span><b>{match_percent}%</b></div>
+  <div class="summary-item primary"><span>Сопоставлено</span><b>{match_percent}%</b></div>
   <div class="summary-item"><span>Авто</span><b>{stats["auto"]}</b></div>
   <div class="summary-item attention"><span>К проверке</span><b>{stats["review"] + stats["unmatched"]}</b></div>
   <div class="summary-item"><span>Доставка/услуги</span><b>{stats["service"]}</b></div>

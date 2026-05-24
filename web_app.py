@@ -489,6 +489,48 @@ a:hover {
   gap: 10px;
   flex-wrap: wrap;
 }
+.cookie-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(16, 24, 40, 0.16);
+}
+.cookie-banner.is-visible {
+  display: flex;
+}
+.cookie-text {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.cookie-text b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text);
+}
+.cookie-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.cookie-actions .btn {
+  min-height: 34px;
+  padding: 0 11px;
+  font-size: 13px;
+}
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
@@ -673,6 +715,13 @@ td.small, th.small { width: 118px; }
   .panel { padding: 14px; }
   .product-intro { padding: 14px; }
   .intro-points { display: flex; }
+  .cookie-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .cookie-actions .btn {
+    flex: 1 1 130px;
+  }
   .review-summary { align-items: stretch; }
   .summary-item { flex: 1 1 145px; justify-content: center; }
   .review-tools { grid-template-columns: 1fr; }
@@ -737,7 +786,41 @@ def page(title: str, body: str) -> bytes:
     <span>© approvemoscow.ru</span>
     <a href="/privacy">Политика обработки персональных данных</a>
   </footer>
+  <div class="cookie-banner" data-cookie-banner role="region" aria-label="Уведомление о cookies">
+    <div class="cookie-text">
+      <b>Cookies и технические данные</b>
+      <span>Сервис использует только необходимые технические данные для работы сайта. Аналитика и рекламные cookies не подключены.</span>
+      <a href="/privacy">Подробнее</a>
+    </div>
+    <div class="cookie-actions">
+      <button class="btn secondary" type="button" data-cookie-choice="necessary">Только необходимые</button>
+      <button class="btn" type="button" data-cookie-choice="accepted">Понятно</button>
+    </div>
+  </div>
   <script>
+    const cookieBanner = document.querySelector('[data-cookie-banner]');
+    if (cookieBanner) {{
+      const storageKey = 'approvemoscow_cookie_choice';
+      let savedChoice = '';
+      try {{
+        savedChoice = window.localStorage.getItem(storageKey) || '';
+      }} catch (error) {{
+        savedChoice = '';
+      }}
+      if (!savedChoice) {{
+        cookieBanner.classList.add('is-visible');
+      }}
+      cookieBanner.querySelectorAll('[data-cookie-choice]').forEach((button) => {{
+        button.addEventListener('click', () => {{
+          try {{
+            window.localStorage.setItem(storageKey, button.dataset.cookieChoice || 'accepted');
+          }} catch (error) {{
+            // Если localStorage недоступен, просто скрываем баннер на текущей странице.
+          }}
+          cookieBanner.classList.remove('is-visible');
+        }});
+      }});
+    }}
     const uploadForm = document.querySelector('[data-upload-form]');
     if (uploadForm) {{
       const requestInput = uploadForm.querySelector('input[name="request"]');
@@ -1405,7 +1488,7 @@ def render_privacy() -> bytes:
   <p>Файлы и результаты обработки хранятся на сервере сервиса в объеме, необходимом для выполнения обработки и скачивания результата. Доступ к серверу ограничивается техническими средствами администрирования.</p>
 
   <h3>7. Cookies и аналитика</h3>
-  <p>На сайте не используется cookie-баннер, поскольку сервис не подключает рекламную аналитику и не использует cookies для отслеживания пользователей.</p>
+  <p>Сайт показывает уведомление о cookies и технических данных. Сервис не подключает рекламную аналитику и не использует cookies для отслеживания пользователей. Выбор в уведомлении сохраняется локально в браузере, чтобы не показывать баннер повторно.</p>
 
   <h3>8. Права пользователя</h3>
   <p>Пользователь может запросить информацию об обработке данных, уточнение или удаление загруженных материалов и результатов обработки, если такие данные сохраняются на сервере.</p>

@@ -49,20 +49,22 @@ class UploadedFile:
 CSS = """
 :root {
   color-scheme: light;
-  --bg: #f4f7f9;
+  --bg: #f6f8fb;
   --panel: #ffffff;
-  --panel-soft: #f8fafb;
-  --text: #101828;
-  --muted: #667085;
-  --line: #d7dee7;
-  --line-strong: #b9c7d5;
-  --accent: #0f6f7d;
-  --accent-strong: #0a5561;
-  --accent-soft: #e8f5f7;
+  --panel-soft: #f8fafc;
+  --text: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --accent: #0f766e;
+  --accent-strong: #0b5f59;
+  --accent-soft: #ecfdf5;
+  --blue: #2563eb;
   --green: #e5f6eb;
   --red: #fdeceb;
   --yellow: #fff6d6;
-  --shadow: 0 18px 42px rgba(16, 24, 40, 0.08);
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.05);
   --font-sans: "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", "Courier New", monospace;
 }
@@ -75,54 +77,107 @@ textarea {
 }
 body {
   margin: 0;
-  background:
-    linear-gradient(180deg, #eef5f7 0, rgba(238, 245, 247, 0) 360px),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font: 14px/1.5 var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
+.site-header {
+  width: min(1200px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 22px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 800;
+  text-decoration: none;
+}
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), #164e63);
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.18);
+}
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.header-links a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.header-links a:hover {
+  color: var(--accent);
+}
 .shell {
   width: min(1200px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 34px 0 44px;
+  padding: 44px 0 44px;
 }
 .topbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: 26px;
 }
 h1 {
   margin: 0;
-  font-size: 30px;
+  font-size: 42px;
   line-height: 1.12;
   letter-spacing: 0;
 }
 .subtitle {
-  margin: 9px 0 0;
+  margin: 14px 0 0;
   color: var(--muted);
-  max-width: 720px;
-  font-size: 15px;
+  max-width: 850px;
+  font-size: 18px;
+  line-height: 1.55;
+}
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+  box-shadow: var(--shadow-soft);
 }
 .home-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(460px, 1.1fr);
-  gap: 20px;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(520px, 1.2fr);
+  gap: 24px;
   align-items: start;
 }
 .product-intro {
-  min-height: 100%;
+  height: fit-content;
+  align-self: start;
+  position: sticky;
+  top: 24px;
   padding: 24px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 20px;
   background: #ffffff;
   box-shadow: var(--shadow);
 }
 .product-intro h2 {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.2;
   letter-spacing: 0;
 }
@@ -134,16 +189,33 @@ h1 {
 }
 .intro-points {
   display: grid;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 12px;
+  margin-top: 20px;
 }
 .intro-point {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 16px;
   background: var(--panel-soft);
-  padding: 11px 12px;
+  padding: 14px 14px 14px 52px;
   color: var(--muted);
   font-size: 13px;
+  position: relative;
+}
+.intro-point::before {
+  content: attr(data-step);
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #dff7f3;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 12px;
 }
 .intro-point b {
   display: block;
@@ -157,8 +229,8 @@ h1 {
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 22px;
+  border-radius: 20px;
+  padding: 30px;
   box-shadow: var(--shadow);
 }
 .grid {
@@ -168,8 +240,22 @@ h1 {
 }
 .upload-panel {
   width: 100%;
+  align-self: start;
 }
-.field { margin-bottom: 18px; }
+.field { margin-bottom: 24px; }
+.field-head {
+  margin-bottom: 12px;
+}
+.field-head h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+.field-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
 label {
   display: block;
   font-weight: 700;
@@ -246,22 +332,24 @@ input[type="search"] { font: inherit; }
 .file-drop {
   position: relative;
   overflow: hidden;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  min-height: 112px;
+  justify-content: center;
+  gap: 10px;
+  min-height: 178px;
   border: 1px dashed var(--line-strong);
-  border-radius: 8px;
+  border-radius: 18px;
   background: var(--panel-soft);
-  padding: 16px;
+  padding: 26px;
+  text-align: center;
   transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .file-drop:hover,
 .file-drop.is-dragover {
   border-color: var(--accent);
-  background: #f2fbfc;
-  box-shadow: 0 0 0 4px rgba(15, 111, 125, 0.09);
+  background: #f0fdfa;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.08);
 }
 .file-input {
   position: absolute;
@@ -281,40 +369,68 @@ input[type="search"] { font: inherit; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 58px;
+  height: 58px;
   border-radius: 999px;
-  background: var(--accent-soft);
+  background: #dff7f3;
   color: var(--accent);
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1;
   font-weight: 700;
 }
 .file-title {
   display: block;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 16px;
 }
 .file-subtitle {
   display: block;
-  margin-top: 3px;
+  margin-top: 2px;
   color: var(--muted);
   font-size: 13px;
+}
+.file-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+}
+.file-support {
+  color: var(--muted);
+  font-size: 12px;
 }
 .file-list {
   position: relative;
   z-index: 5;
   pointer-events: auto;
-  margin-top: 8px;
+  margin-top: 12px;
   color: var(--muted);
   font-size: 13px;
+}
+.files-list {
+  max-height: 292px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .file-list.is-filled {
   color: var(--text);
 }
-.file-list b {
-  display: block;
-  margin-bottom: 4px;
+.file-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-weight: 700;
 }
 .file-list ul {
   margin: 0;
@@ -322,32 +438,72 @@ input[type="search"] { font: inherit; }
   list-style: none;
 }
 .file-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 4px 0;
-  padding: 5px 6px 5px 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 14px;
   background: #fff;
   overflow-wrap: anywhere;
 }
 .file-name {
   min-width: 0;
   overflow-wrap: anywhere;
+  color: var(--text);
+  font-weight: 700;
+}
+.file-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.file-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 12px;
+  font-weight: 700;
+}
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .file-remove {
   flex: 0 0 auto;
-  min-height: 26px;
-  border: 1px solid #e0b7b5;
-  border-radius: 5px;
+  min-height: 30px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
   background: #fff5f5;
   color: #8a2420;
-  padding: 0 8px;
+  padding: 0 10px;
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+}
+.file-replace {
+  flex: 0 0 auto;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.file-replace:hover {
+  background: var(--accent-soft);
 }
 .file-remove:hover {
   background: #ffe9e9;
@@ -357,16 +513,36 @@ input[type="search"] { font: inherit; }
   color: var(--muted);
   font-size: 13px;
 }
+.report-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.report-title {
+  margin-top: 24px;
+  font-size: 16px;
+}
+.report-list li {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .consent-field {
   display: flex;
   gap: 9px;
   align-items: flex-start;
-  margin: 4px 0 16px;
+  margin: 4px 0 18px;
   color: var(--text);
   font-size: 13px;
   padding: 11px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 16px;
   background: var(--panel-soft);
 }
 .consent-field input {
@@ -385,20 +561,42 @@ a {
 a:hover {
   color: var(--accent-strong);
 }
-.format-note {
+.stepper {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0 0 18px;
+  gap: 10px;
+  margin: 0 0 26px;
 }
-.pill {
+.step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 9px 10px;
-  color: var(--muted);
+  border-radius: 16px;
   background: var(--panel-soft);
-  font-size: 12px;
-  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.step-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+.step.is-active {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: var(--text);
 }
 .actions {
   display: flex;
@@ -411,15 +609,26 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 42px;
-  padding: 0 16px;
+  min-height: 46px;
+  padding: 0 18px;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 14px;
   background: var(--accent);
   color: #fff;
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
+}
+.btn.primary-wide {
+  width: 100%;
+  min-height: 52px;
+  font-size: 15px;
+}
+.cta-note {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 .btn,
 .btn:visited,
@@ -683,6 +892,50 @@ td.small, th.small { width: 118px; }
   text-align: center;
   color: var(--muted);
 }
+.ready-panel {
+  display: grid;
+  gap: 16px;
+}
+.ready-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 800;
+  font-size: 13px;
+}
+.ready-panel h2 {
+  margin: 0;
+  font-size: 24px;
+}
+.ready-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+.ready-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.ready-stat {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ready-stat b {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+  font: 800 22px/1 var(--font-mono);
+}
 .processing {
   display: none;
   margin-top: 16px;
@@ -778,14 +1031,23 @@ td.small, th.small { width: 118px; }
   font-weight: 700;
 }
 @media (max-width: 840px) {
-  .shell { width: min(100% - 20px, 1180px); padding-top: 20px; }
+  .site-header { width: min(100% - 24px, 1180px); padding-top: 14px; }
+  .header-links { gap: 10px; }
+  .shell { width: min(100% - 24px, 1180px); padding-top: 26px; }
   .topbar, .grid, .home-layout { display: block; }
+  .home-layout { display: flex; flex-direction: column; }
+  .grid { order: 1; }
+  .product-intro { order: 2; position: static; }
   .upload-panel { max-width: none; }
-  .panel { padding: 14px; }
-  .product-intro { padding: 16px; margin-bottom: 14px; }
+  .panel { padding: 18px; border-radius: 18px; }
+  .product-intro { padding: 18px; margin-top: 14px; }
   .product-intro h2 { font-size: 20px; }
-  .intro-points { display: flex; }
-  .format-note { grid-template-columns: 1fr; }
+  .intro-points { display: grid; }
+  .stepper { grid-template-columns: 1fr; }
+  .file-drop { min-height: 164px; padding: 20px; }
+  .file-list li { grid-template-columns: 1fr; }
+  .file-actions { justify-content: flex-start; }
+  .report-list { grid-template-columns: 1fr; }
   .cookie-banner {
     align-items: stretch;
     flex-direction: column;
@@ -794,12 +1056,14 @@ td.small, th.small { width: 118px; }
     flex: 1 1 130px;
   }
   .review-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ready-stats { grid-template-columns: 1fr; }
   .summary-help { grid-template-columns: 1fr; }
   .review-tools { grid-template-columns: 1fr; }
   .review-count { padding-bottom: 0; }
-  h1 { font-size: 24px; }
+  h1 { font-size: 30px; }
+  .subtitle { font-size: 15px; }
   .btn { width: 100%; }
-  .site-footer { width: min(100% - 20px, 1180px); }
+  .site-footer { width: min(100% - 24px, 1180px); }
 }
 """
 
@@ -853,6 +1117,16 @@ def page(title: str, body: str) -> bytes:
   <style>{CSS}</style>
 </head>
 <body>
+  <header class="site-header">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>Сравнение КП</span>
+    </a>
+    <nav class="header-links" aria-label="Навигация">
+      <a href="/#how-it-works">Помощь</a>
+      <a href="/privacy">Политика</a>
+    </nav>
+  </header>
   <main class="shell">{body}</main>
   <footer class="site-footer">
     <span>© approvemoscow.ru</span>
@@ -915,7 +1189,7 @@ def page(title: str, body: str) -> bytes:
         activeController = null;
         if (submitButton) {{
           submitButton.disabled = false;
-          submitButton.textContent = 'Обработать файлы';
+          submitButton.textContent = 'Сформировать Excel-отчет';
         }}
         if (stopButton) stopButton.classList.remove('is-visible');
         if (processing) processing.classList.remove('is-visible');
@@ -962,17 +1236,56 @@ def page(title: str, body: str) -> bytes:
           target.textContent = input.multiple ? 'Файлы пока не выбраны.' : 'Файл пока не выбран.';
           return;
         }}
-        const summary = document.createElement('b');
+        const fileSize = (size) => {{
+          if (size >= 1024 * 1024) return (size / 1024 / 1024).toFixed(1).replace('.0', '') + ' МБ';
+          if (size >= 1024) return Math.round(size / 1024) + ' КБ';
+          return size + ' Б';
+        }};
+        const fileExt = (name) => {{
+          const part = String(name || '').split('.').pop() || '';
+          return part ? part.toUpperCase() : 'ФАЙЛ';
+        }};
+        const summary = document.createElement('div');
+        summary.className = 'file-summary';
         summary.textContent = input.multiple
-          ? 'Выбрано файлов: ' + files.length
-          : 'Выбран файл:';
+          ? 'Загружено файлов: ' + files.length
+          : 'Файл выбран';
         target.appendChild(summary);
         const list = document.createElement('ul');
         files.forEach((file, index) => {{
           const item = document.createElement('li');
+          const details = document.createElement('div');
           const name = document.createElement('span');
           name.className = 'file-name';
           name.textContent = file.name;
+          const meta = document.createElement('div');
+          meta.className = 'file-meta';
+          const format = document.createElement('span');
+          format.textContent = fileExt(file.name);
+          const size = document.createElement('span');
+          size.textContent = fileSize(file.size);
+          const status = document.createElement('span');
+          status.className = 'file-status';
+          status.textContent = 'Готово';
+          meta.appendChild(format);
+          meta.appendChild(size);
+          meta.appendChild(status);
+          details.appendChild(name);
+          details.appendChild(meta);
+          const actions = document.createElement('div');
+          actions.className = 'file-actions';
+          if (!input.multiple) {{
+            const replace = document.createElement('button');
+            replace.className = 'file-replace';
+            replace.type = 'button';
+            replace.textContent = 'Заменить';
+            replace.addEventListener('click', (event) => {{
+              event.preventDefault();
+              event.stopPropagation();
+              input.click();
+            }});
+            actions.appendChild(replace);
+          }}
           const remove = document.createElement('button');
           remove.className = 'file-remove';
           remove.type = 'button';
@@ -982,8 +1295,9 @@ def page(title: str, body: str) -> bytes:
             event.stopPropagation();
             removeInputFile(input, index);
           }});
-          item.appendChild(name);
-          item.appendChild(remove);
+          actions.appendChild(remove);
+          item.appendChild(details);
+          item.appendChild(actions);
           list.appendChild(item);
         }});
         target.appendChild(list);
@@ -1059,7 +1373,7 @@ def page(title: str, body: str) -> bytes:
         activeController = new AbortController();
         if (submitButton) {{
           submitButton.disabled = true;
-          submitButton.textContent = 'Обрабатываем...';
+          submitButton.textContent = 'Формируем Excel-отчет...';
         }}
         if (stopButton) stopButton.classList.add('is-visible');
         if (processing) processing.classList.add('is-visible');
@@ -1320,61 +1634,75 @@ def render_home(error: str = "") -> bytes:
 <div class="topbar">
   <div>
     <h1>Сравнение ТЗ и КП поставщиков</h1>
-    <p class="subtitle">Загрузите заявку и коммерческие предложения. Сервис сопоставит позиции, выделит спорные строки и сформирует Excel-сводку.</p>
+    <p class="subtitle">Загрузите заявку и коммерческие предложения. Сервис сопоставит позиции, найдет минимальные цены и сформирует Excel-сводку для проверки закупки.</p>
+    <div class="hero-badge">XLSX · PDF · Excel-отчет</div>
   </div>
 </div>
 {error_html}
 <section class="home-layout">
-<section class="product-intro">
-  <h2>Сводка по ценам без ручного сведения таблиц</h2>
-  <p>Инструмент извлекает позиции из заявок, КП и счетов, находит совпадения и оставляет спорные строки на ручное подтверждение.</p>
+<section class="product-intro info-panel" id="how-it-works">
+  <h2>Как это работает</h2>
   <div class="intro-points">
-    <div class="intro-point"><b>Сопоставление</b> <span>Заявка, ТЗ, КП и счета в одном сценарии.</span></div>
-    <div class="intro-point"><b>Контроль</b> <span>Сомнительные совпадения попадают на проверку перед отчетом.</span></div>
-    <div class="intro-point"><b>Excel-результат</b> <span>Поставщики, цены, сроки, услуги и подсветка минимумов.</span></div>
+    <div class="intro-point" data-step="1"><b>Загрузите заявку</b> <span>Excel-файл со списком позиций, количеством и единицами измерения.</span></div>
+    <div class="intro-point" data-step="2"><b>Добавьте КП поставщиков</b> <span>Можно загрузить несколько Excel/PDF файлов от разных поставщиков.</span></div>
+    <div class="intro-point" data-step="3"><b>Получите Excel-отчет</b> <span>Сервис выделит совпадения, минимальные цены и спорные строки.</span></div>
   </div>
+  <h2 class="report-title">В отчете будет</h2>
+  <ul class="report-list">
+    <li>позиции</li>
+    <li>поставщики</li>
+    <li>цены за единицу</li>
+    <li>итоговые суммы</li>
+    <li>минимальные предложения</li>
+    <li>спорные совпадения</li>
+  </ul>
 </section>
 <section class="grid">
   <form class="panel upload-panel" action="/process" method="post" enctype="multipart/form-data" data-upload-form novalidate>
-    <div class="format-note">
-      <span class="pill">Заявка XLSX</span>
-      <span class="pill">КП XLSX/PDF</span>
-      <span class="pill">Excel-отчет</span>
+    <div class="stepper" aria-label="Этапы обработки">
+      <div class="step is-active"><span class="step-number">1</span><span>Заявка</span></div>
+      <div class="step"><span class="step-number">2</span><span>КП поставщиков</span></div>
+      <div class="step"><span class="step-number">3</span><span>Excel-отчет</span></div>
     </div>
     <div class="field">
-      <label for="request">Заявка / ТЗ (.xlsx)</label>
+      <div class="field-head">
+        <h3>Заявка / ТЗ</h3>
+        <p>Загрузите Excel-файл со списком позиций, количеством и единицами измерения.</p>
+      </div>
       <div class="file-drop" data-drop-zone>
         <input class="file-input" id="request" name="request" type="file" accept=".xlsx" required>
         <span class="file-icon">↑</span>
-        <div>
-          <span class="file-title">Перетащите файл заявки сюда</span>
-          <span class="file-subtitle">или нажмите, чтобы выбрать .xlsx на компьютере</span>
-          <div class="file-list" data-file-list="request">Файл пока не выбран.</div>
-        </div>
+        <span class="file-title">Перетащите файл заявки сюда</span>
+        <span class="file-subtitle">или выберите .xlsx на компьютере</span>
+        <span class="file-pick">Выбрать файл</span>
+        <span class="file-support">Поддерживается .xlsx</span>
       </div>
-      <div class="hint">Файл со списком позиций, единицами и количеством.</div>
+      <div class="file-list" data-file-list="request">Файл пока не выбран.</div>
     </div>
     <div class="field">
-      <label for="offers">КП / счета поставщиков (.xlsx, .pdf)</label>
+      <div class="field-head">
+        <h3>КП / счета поставщиков</h3>
+        <p>Добавьте два или больше КП или счетов от поставщиков.</p>
+      </div>
       <div class="file-drop" data-drop-zone>
         <input class="file-input" id="offers" name="offers" type="file" accept=".xlsx,.pdf,.xls" multiple required>
         <span class="file-icon">↑</span>
-        <div>
-          <span class="file-title">Перетащите КП или счета сюда</span>
-          <span class="file-subtitle">или нажмите, чтобы выбрать несколько файлов</span>
-          <div class="file-list" data-file-list="offers">Файлы пока не выбраны.</div>
-        </div>
+        <span class="file-title">Перетащите КП или счета сюда</span>
+        <span class="file-subtitle">или выберите несколько файлов</span>
+        <span class="file-pick">Выбрать файлы</span>
+        <span class="file-support">Поддерживаются .xlsx и текстовые PDF</span>
       </div>
-      <div class="hint">Выберите два или больше КП/счетов. Подходят файлы .xlsx и текстовые PDF.</div>
+      <div class="file-list files-list" data-file-list="offers">Файлы пока не выбраны.</div>
     </div>
     <div class="consent-field">
       <input id="privacy_consent" name="privacy_consent" type="checkbox" value="yes" required>
-      <label for="privacy_consent">Я согласен на <a href="/privacy" target="_blank" rel="noopener">обработку персональных данных</a></label>
+      <label for="privacy_consent">Я согласен с <a href="/privacy" target="_blank" rel="noopener">обработкой персональных данных</a></label>
     </div>
     <div class="actions">
-      <button class="btn" type="submit" data-submit>Обработать файлы</button>
+      <button class="btn primary-wide" type="submit" data-submit>Сформировать Excel-отчет</button>
       <button class="btn stop" type="button" data-stop>Остановить обработку</button>
     </div>
+    <div class="cta-note">Обычно обработка занимает 1–3 минуты.</div>
     <div class="notice error" data-form-message style="display:none; margin-top:12px; margin-bottom:0"></div>
     <div class="processing" data-processing>
       <div class="processing-head">
@@ -1513,6 +1841,19 @@ def render_review(run_id: str) -> bytes:
 
 
 def render_done(run_id: str) -> bytes:
+    stats_html = ""
+    try:
+        request_items, matches, _errors = load_state(RUNS_DIR / run_id)
+        stats = stats_for(request_items, matches)
+        suppliers = {match.supplier_item.supplier for match in matches if match.supplier_item.supplier}
+        stats_html = f"""
+  <div class="ready-stats">
+    <div class="ready-stat">Позиции заявки<b>{stats["request"]}</b></div>
+    <div class="ready-stat">Спорные совпадения<b>{stats["review"] + stats["unmatched"]}</b></div>
+    <div class="ready-stat">Поставщики<b>{len(suppliers)}</b></div>
+  </div>"""
+    except Exception:
+        stats_html = ""
     body = f"""
 <div class="topbar">
   <div>
@@ -1520,9 +1861,15 @@ def render_done(run_id: str) -> bytes:
     <p class="subtitle">Ручные правки применены. Итоговая сводка сформирована.</p>
   </div>
 </div>
-<section class="panel">
+<section class="panel ready-panel">
+  <span class="ready-badge">Готово</span>
+  <div>
+    <h2>Excel-отчет готов</h2>
+    <p>Файл можно скачать и использовать для проверки закупки.</p>
+  </div>
+  {stats_html}
   <div class="actions">
-    <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать итоговый Excel</a>
+    <a class="btn" href="/download/{esc(run_id)}/summary.xlsx" download>Скачать Excel-отчет</a>
     <a class="btn secondary" href="/download/{esc(run_id)}/review.xlsx" download>Скачать файл проверки</a>
     <a class="btn secondary" href="/">Новая обработка</a>
   </div>

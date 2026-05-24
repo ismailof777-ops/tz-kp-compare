@@ -970,14 +970,14 @@ td.small, th.small { width: 118px; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  max-width: 126px;
   border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 6px 9px;
+  border-radius: 8px;
+  padding: 7px 10px;
   font-size: 11px;
   line-height: 1.2;
   font-weight: 800;
   text-align: center;
+  white-space: nowrap;
 }
 .status.review { background: #fff6d8; border-color: #f1d88d; color: #6f5200; }
 .status.unmatched { background: #fdeaea; border-color: #f2b9b7; color: #8a2420; }

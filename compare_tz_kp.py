@@ -4,6 +4,7 @@ import argparse
 import ctypes
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -1942,11 +1943,17 @@ def add_low_confidence_review_suggestions(
     matches: list[Match],
 ) -> list[Match]:
     """Keep weak candidates visible for manual review instead of dropping them."""
-    min_score = float(os.environ.get("MIN_REVIEW_SUGGESTION_SCORE", "0.12"))
-    updated: list[Match] = []
-    for match in matches:
+    min_score = float(os.environ.get("MIN_REVIEW_SUGGESTION_SCORE", "0.08"))
+    target_percent = float(os.environ.get("REVIEW_SUGGESTION_TARGET_PERCENT", "0.95"))
+    target_fill_score = float(os.environ.get("MIN_REVIEW_TARGET_FILL_SCORE", "0.02"))
+    updated = list(matches)
+    comparable_count = sum(1 for match in matches if match.status != "service")
+    matched_count = sum(1 for match in matches if match.status != "service" and match.request_pos)
+    target_count = min(comparable_count, math.ceil(comparable_count * max(0, min(1, target_percent))))
+    candidates: list[tuple[int, Match, RequestItem, float, str]] = []
+
+    for idx, match in enumerate(matches):
         if match.status == "service" or match.request_pos:
-            updated.append(match)
             continue
         best_item = None
         best_score = 0.0
@@ -1957,11 +1964,20 @@ def add_low_confidence_review_suggestions(
                 best_score = score
                 best_item = request
                 best_reason = reason
-        if best_item and best_score >= min_score:
-            reason = best_reason or "низкая уверенность сопоставления, требуется ручная проверка"
-            updated.append(Match(match.supplier_item, best_item.pos, best_score, "review", reason))
+        if best_item and best_score > 0:
+            candidates.append((idx, match, best_item, best_score, best_reason))
+
+    for idx, match, best_item, best_score, best_reason in sorted(candidates, key=lambda item: item[3], reverse=True):
+        promote_by_score = best_score >= min_score
+        promote_to_target = matched_count < target_count and best_score >= target_fill_score
+        if not promote_by_score and not promote_to_target:
+            continue
+        if best_score < min_score:
+            reason = best_reason or "очень слабое возможное совпадение, требуется ручная проверка"
         else:
-            updated.append(match)
+            reason = best_reason or "низкая уверенность сопоставления, требуется ручная проверка"
+        updated[idx] = Match(match.supplier_item, best_item.pos, best_score, "review", reason)
+        matched_count += 1
     return updated
 
 

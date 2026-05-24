@@ -342,6 +342,30 @@ input[type="search"] { font: inherit; }
   color: var(--muted);
   font-size: 13px;
 }
+.consent-field {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 4px 0 14px;
+  color: var(--text);
+  font-size: 13px;
+}
+.consent-field input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+.consent-field label {
+  margin: 0;
+  font-weight: 400;
+}
+a {
+  color: var(--accent);
+}
+a:hover {
+  color: var(--accent-strong);
+}
 .format-note {
   display: flex;
   gap: 8px;
@@ -436,6 +460,35 @@ input[type="search"] { font: inherit; }
 }
 .notice.warn { border-color: #f4c76d; background: #fff8e6; }
 .notice.error { border-color: #eda5a3; background: #fff0f0; }
+.legal-page {
+  max-width: 920px;
+}
+.legal-page h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.legal-page h3 {
+  margin: 18px 0 7px;
+  font-size: 15px;
+}
+.legal-page p,
+.legal-page li {
+  color: var(--muted);
+}
+.legal-page ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.site-footer {
+  width: min(1180px, calc(100% - 32px));
+  margin: -22px auto 0;
+  padding: 0 0 28px;
+  color: var(--muted);
+  font-size: 13px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
@@ -680,11 +733,16 @@ def page(title: str, body: str) -> bytes:
 </head>
 <body>
   <main class="shell">{body}</main>
+  <footer class="site-footer">
+    <span>© approvemoscow.ru</span>
+    <a href="/privacy">Политика обработки персональных данных</a>
+  </footer>
   <script>
     const uploadForm = document.querySelector('[data-upload-form]');
     if (uploadForm) {{
       const requestInput = uploadForm.querySelector('input[name="request"]');
       const offersInput = uploadForm.querySelector('input[name="offers"]');
+      const consentInput = uploadForm.querySelector('input[name="privacy_consent"]');
       const formMessage = uploadForm.querySelector('[data-form-message]');
       const submitButton = uploadForm.querySelector('[data-submit]');
       const stopButton = uploadForm.querySelector('[data-stop]');
@@ -837,6 +895,11 @@ def page(title: str, body: str) -> bytes:
           offersInput && offersInput.focus();
           return;
         }}
+        if (!consentInput || !consentInput.checked) {{
+          showMessage('Подтвердите согласие на обработку персональных данных.');
+          consentInput && consentInput.focus();
+          return;
+        }}
         if (formMessage) formMessage.style.display = 'none';
         activeController = new AbortController();
         if (submitButton) {{
@@ -968,6 +1031,25 @@ def parse_multipart_upload(headers, body: bytes) -> dict[str, list[UploadedFile]
         payload = part.get_payload(decode=True) or b""
         files.setdefault(field_name, []).append(UploadedFile(clean_text(filename), payload))
     return files
+
+
+def multipart_has_field(headers, body: bytes, expected_name: str) -> bool:
+    content_type = headers.get("Content-Type", "")
+    if not content_type.lower().startswith("multipart/form-data"):
+        return False
+
+    message = BytesParser(policy=email_policy).parsebytes(
+        b"Content-Type: "
+        + content_type.encode("utf-8", errors="ignore")
+        + b"\r\nMIME-Version: 1.0\r\n\r\n"
+        + body
+    )
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        if part.get_param("name", header="content-disposition") == expected_name:
+            return True
+    return False
 
 
 def request_item_from_dict(data: dict) -> RequestItem:
@@ -1128,6 +1210,10 @@ def render_home(error: str = "") -> bytes:
       </div>
       <div class="hint">Выберите два или больше КП/счетов. Подходят файлы .xlsx и текстовые PDF.</div>
     </div>
+    <div class="consent-field">
+      <input id="privacy_consent" name="privacy_consent" type="checkbox" value="yes" required>
+      <label for="privacy_consent">Я согласен на <a href="/privacy" target="_blank" rel="noopener">обработку персональных данных</a></label>
+    </div>
     <div class="actions">
       <button class="btn" type="submit" data-submit>Обработать файлы</button>
       <button class="btn stop" type="button" data-stop>Остановить обработку</button>
@@ -1287,6 +1373,50 @@ def render_done(run_id: str) -> bytes:
     return page("Excel готов", body)
 
 
+def render_privacy() -> bytes:
+    body = """
+<div class="topbar">
+  <div>
+    <h1>Политика обработки персональных данных</h1>
+    <p class="subtitle">Документ описывает, какие данные обрабатывает сервис approvemoscow.ru при сравнении заявки/ТЗ и КП поставщиков.</p>
+  </div>
+</div>
+<section class="panel legal-page">
+  <h2>1. Общие положения</h2>
+  <p>Настоящая политика применяется к сайту approvemoscow.ru и сервису сравнения заявки/ТЗ с коммерческими предложениями поставщиков. Используя сервис и загружая файлы, пользователь подтверждает согласие с условиями обработки данных.</p>
+
+  <h3>2. Какие данные могут обрабатываться</h3>
+  <ul>
+    <li>сведения из загружаемых файлов заявки, ТЗ, КП, счетов и PDF-документов;</li>
+    <li>контактные данные, реквизиты организаций, ФИО, телефоны, адреса электронной почты, если они содержатся в файлах;</li>
+    <li>технические данные запроса: IP-адрес, дата и время обращения, сведения о браузере и системные журналы сервера.</li>
+  </ul>
+
+  <h3>3. Цели обработки</h3>
+  <p>Данные используются для загрузки и распознавания документов, сопоставления позиций заявки и КП, формирования Excel-отчета, диагностики ошибок и обеспечения работоспособности сервиса.</p>
+
+  <h3>4. Правовые основания и согласие</h3>
+  <p>Обработка выполняется на основании согласия пользователя, выраженного отметкой чекбокса перед отправкой файлов, а также для исполнения действия, запрошенного пользователем в сервисе.</p>
+
+  <h3>5. Передача третьим лицам</h3>
+  <p>Для сопоставления позиций сервис может использовать внешние API обработки текста. В такие API могут передаваться фрагменты данных из загруженных документов, необходимые для сравнения позиций. Сервис не продает персональные данные и не передает их третьим лицам для рекламных целей.</p>
+
+  <h3>6. Хранение и защита</h3>
+  <p>Файлы и результаты обработки хранятся на сервере сервиса в объеме, необходимом для выполнения обработки и скачивания результата. Доступ к серверу ограничивается техническими средствами администрирования.</p>
+
+  <h3>7. Cookies и аналитика</h3>
+  <p>На сайте не используется cookie-баннер, поскольку сервис не подключает рекламную аналитику и не использует cookies для отслеживания пользователей.</p>
+
+  <h3>8. Права пользователя</h3>
+  <p>Пользователь может запросить информацию об обработке данных, уточнение или удаление загруженных материалов и результатов обработки, если такие данные сохраняются на сервере.</p>
+
+  <h3>9. Контакты</h3>
+  <p>Для вопросов по обработке персональных данных используйте контактный канал владельца сайта approvemoscow.ru.</p>
+</section>
+"""
+    return page("Политика обработки персональных данных", body)
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "TZKP/0.1"
 
@@ -1306,6 +1436,15 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def wants_json(self) -> bool:
+        return "application/json" in self.headers.get("Accept", "").lower()
+
+    def send_process_error(self, message: str, status: HTTPStatus = HTTPStatus.BAD_REQUEST) -> None:
+        if self.wants_json():
+            self.send_json({"state": "error", "message": message}, status)
+            return
+        self.send_html(render_home(message), status)
+
     def redirect(self, location: str) -> None:
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", location)
@@ -1316,6 +1455,9 @@ class AppHandler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/":
             self.send_html(render_home())
+            return
+        if path == "/privacy":
+            self.send_html(render_privacy())
             return
         if path.startswith("/review/"):
             run_id = safe_filename(unquote(path.removeprefix("/review/")), "run")
@@ -1363,19 +1505,24 @@ class AppHandler(BaseHTTPRequestHandler):
     def handle_process(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_UPLOAD_SIZE:
-            self.send_html(render_home("Файлы слишком большие для локальной MVP-версии."), HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            self.send_process_error("Файлы слишком большие для локальной MVP-версии.", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
 
-        uploads = parse_multipart_upload(self.headers, self.rfile.read(length))
+        body = self.rfile.read(length)
+        if not multipart_has_field(self.headers, body, "privacy_consent"):
+            self.send_process_error("Подтвердите согласие на обработку персональных данных.")
+            return
+
+        uploads = parse_multipart_upload(self.headers, body)
         request_fields = uploads.get("request", [])
         offer_fields = uploads.get("offers", [])
         request_field = request_fields[0] if request_fields else None
         if request_field is None or not request_field.filename:
-            self.send_html(render_home("Загрузите файл заявки .xlsx."), HTTPStatus.BAD_REQUEST)
+            self.send_process_error("Загрузите файл заявки .xlsx.")
             return
         offer_fields = [field for field in offer_fields if field.filename]
         if len(offer_fields) < 2:
-            self.send_html(render_home("Загрузите минимум два КП или счета."), HTTPStatus.BAD_REQUEST)
+            self.send_process_error("Загрузите минимум два КП или счета.")
             return
 
         run_id = uuid.uuid4().hex[:12]

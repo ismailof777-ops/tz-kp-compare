@@ -1837,7 +1837,7 @@ def improve_matches_with_deepseek(
     progress_callback: ProgressCallback | None = None,
 ) -> list[Match]:
     if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
-        return matches
+        return add_low_confidence_review_suggestions(request_items, matches)
 
     request_payload = [
         {
@@ -1915,7 +1915,7 @@ def improve_matches_with_deepseek(
             alternatives = sorted(alternatives, key=lambda alt: alt[1], reverse=True)[:5]
             if (not request_pos or request_pos not in by_pos) and alternatives:
                 request_pos, confidence, _ = alternatives[0]
-            if not request_pos or request_pos not in by_pos or confidence < 0.38:
+            if not request_pos or request_pos not in by_pos or confidence < 0.22:
                 continue
             old = updated[offer_id]
             reason = clean_text(item.get("reason") or "")
@@ -1934,6 +1934,34 @@ def improve_matches_with_deepseek(
                     "review",
                     f"ИИ предлагает проверить: {reason}" if reason else "ИИ предлагает проверить совпадение",
                 )
+    return add_low_confidence_review_suggestions(request_items, updated)
+
+
+def add_low_confidence_review_suggestions(
+    request_items: list[RequestItem],
+    matches: list[Match],
+) -> list[Match]:
+    """Keep weak candidates visible for manual review instead of dropping them."""
+    min_score = float(os.environ.get("MIN_REVIEW_SUGGESTION_SCORE", "0.12"))
+    updated: list[Match] = []
+    for match in matches:
+        if match.status == "service" or match.request_pos:
+            updated.append(match)
+            continue
+        best_item = None
+        best_score = 0.0
+        best_reason = ""
+        for request in request_items:
+            score, reason = match_score(request.name, match.supplier_item.name)
+            if score > best_score:
+                best_score = score
+                best_item = request
+                best_reason = reason
+        if best_item and best_score >= min_score:
+            reason = best_reason or "низкая уверенность сопоставления, требуется ручная проверка"
+            updated.append(Match(match.supplier_item, best_item.pos, best_score, "review", reason))
+        else:
+            updated.append(match)
     return updated
 
 

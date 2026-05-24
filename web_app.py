@@ -1314,7 +1314,7 @@ def render_home(error: str = "") -> bytes:
 {error_html}
 <section class="home-layout">
 <section class="product-intro">
-  <h2>Сводка по ценам без ручного сведения таблиц.</h2>
+  <h2>Сводка по ценам без ручного сведения таблиц</h2>
   <p>Инструмент извлекает позиции из заявок, КП и счетов, находит совпадения и оставляет спорные строки на ручное подтверждение.</p>
   <div class="intro-points">
     <div class="intro-point"><b>Сопоставление</b> <span>Заявка, ТЗ, КП и счета в одном сценарии.</span></div>

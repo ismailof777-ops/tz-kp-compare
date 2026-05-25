@@ -11,6 +11,7 @@ import shutil
 import sys
 import urllib.error
 import urllib.request
+from datetime import date, datetime, time
 from dataclasses import dataclass, asdict
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -20,6 +21,7 @@ from typing import Callable, Iterable
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.datetime import to_excel
 from pypdf import PdfReader
 
 
@@ -257,6 +259,10 @@ def parse_number(value) -> float | None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
+    if isinstance(value, datetime):
+        return float(to_excel(value))
+    if isinstance(value, date):
+        return float(to_excel(datetime.combine(value, time())))
     text = clean_text(value)
     text = text.replace(" ", "").replace("\u202f", "").replace(",", ".")
     text = re.sub(r"[^\d.\-]", "", text)
@@ -332,6 +338,50 @@ def is_service_item(item: SupplierItem) -> bool:
 @lru_cache(maxsize=40000)
 def item_categories(text: str) -> frozenset[str]:
     return frozenset(SYNONYM_BY_TOKEN[token] for token in tokens(text) if token in SYNONYM_BY_TOKEN)
+
+
+@lru_cache(maxsize=40000)
+def product_type_tags(text: str) -> frozenset[str]:
+    source = normalize(text)
+    tags: set[str] = set()
+
+    patterns = [
+        ("thermostatic_head", (r"\bтермоголовк", r"термостатическ\w*\s+головк", r"головк\w*\s+термостат")),
+        ("radiator", (r"\bрадиатор",)),
+        ("thermostatic_valve", (r"клапан\w*\s+термостат", r"термостат\w*\s+клапан")),
+        ("radiator_valve", (r"клапан\w*\s+радиатор", r"настроечн\w*\s+клапан")),
+        ("vacuum_valve", (r"клапан\w*\s+вакуум", r"\bаэратор")),
+        ("ball_valve", (r"кран\w*\s+шаров", r"шаров\w*\s+кран")),
+        ("air_vent", (r"воздухоотвод",)),
+        ("pipe", (r"\bтруб",)),
+        ("elbow", (r"\bотвод", r"\bугол")),
+        ("tee", (r"\bтройник",)),
+        ("transition", (r"\bпереход",)),
+        ("cross", (r"\bкрестовин",)),
+        ("plug", (r"\bзаглушк",)),
+        ("coupling", (r"\bмуфт",)),
+        ("clamp", (r"\bхомут",)),
+        ("bolt", (r"\bболт",)),
+        ("screw", (r"\bвинт", r"\bсаморез", r"\bшуруп")),
+        ("nut", (r"\bгайк",)),
+        ("sealant", (r"\bгерметик", r"\bсиликон")),
+        ("primer", (r"\bгрунтовк", r"\bгрунт\b")),
+    ]
+    for tag, tag_patterns in patterns:
+        if any(re.search(pattern, source) for pattern in tag_patterns):
+            tags.add(tag)
+
+    if not tags and re.search(r"\bклапан", source):
+        tags.add("valve")
+    if not tags and re.search(r"\bкран", source):
+        tags.add("tap")
+    return frozenset(tags)
+
+
+def product_types_incompatible(request_name: str, supplier_name: str) -> bool:
+    req_tags = product_type_tags(request_name)
+    sup_tags = product_type_tags(supplier_name)
+    return bool(req_tags and sup_tags and req_tags.isdisjoint(sup_tags))
 
 
 def normalized_unit(unit: str) -> str:
@@ -889,6 +939,9 @@ def brands(text: str) -> frozenset[str]:
 
 
 def match_score(request_name: str, supplier_name: str) -> tuple[float, str]:
+    if product_types_incompatible(request_name, supplier_name):
+        return 0.0, "несовместимые товарные категории"
+
     req_norm = normalize(request_name)
     sup_norm = normalize(supplier_name)
     seq = SequenceMatcher(None, req_norm, sup_norm).ratio()
@@ -1078,6 +1131,102 @@ def supplier_invoice_summary(supplier: str, matches: list[Match]) -> str:
     return ", ".join(labels)
 
 
+def header_values(ws, header_row: int) -> dict[int, str]:
+    return {cell.column: clean_text(cell.value).lower() for cell in ws[header_row]}
+
+
+def first_header_col(headers: dict[int, str], includes: Iterable[str], excludes: Iterable[str] = ()) -> int | None:
+    includes = [value.lower() for value in includes]
+    excludes = [value.lower() for value in excludes]
+    for col, value in headers.items():
+        if not value or any(marker in value for marker in excludes):
+            continue
+        if any(marker in value for marker in includes):
+            return col
+    return None
+
+
+def looks_like_vat_column(ws, col: int, header_row: int) -> bool:
+    values = []
+    for row in range(header_row + 1, min(ws.max_row, header_row + 25) + 1):
+        value = parse_number(ws.cell(row, col).value)
+        if value is not None:
+            values.append(value)
+    if len(values) < 3:
+        return False
+    common_vat = sum(1 for value in values if value in {0, 10, 18, 20, 22})
+    return common_vat / len(values) >= 0.7
+
+
+def find_loose_supplier_header(ws) -> int | None:
+    for row in range(1, min(ws.max_row, 40) + 1):
+        values = [clean_text(cell.value).lower() for cell in ws[row]]
+        joined = " ".join(values)
+        has_name = any(marker in joined for marker in ["товар", "наименование", "номенклатура"])
+        has_price = "цена" in joined or "стоимость" in joined or "сумма" in joined
+        has_qty = "количество" in joined or "кол-во" in joined or "кол во" in joined
+        if has_name and has_price and has_qty:
+            return row
+    return None
+
+
+def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    header_row = find_loose_supplier_header(ws)
+    if not header_row:
+        return []
+
+    headers = header_values(ws, header_row)
+    name_col = first_header_col(headers, ["номенклатура", "наименование", "товар"], ["код", "артикул"])
+    qty_col = first_header_col(headers, ["количество", "кол-во", "кол во"])
+    unit_col = first_header_col(headers, ["ед.", "единиц", "ед "])
+    price_col = first_header_col(headers, ["цена"], ["ндс"])
+    total_col = first_header_col(headers, ["стоимость", "сумма"], ["ндс"])
+    pos_col = first_header_col(headers, ["№", "номер"]) or 1
+
+    if not name_col:
+        return []
+
+    # CSV converted through Excel sometimes shifts data one column left when a
+    # text header is split into "Товары (работы" / "услуги)".
+    if price_col and looks_like_vat_column(ws, price_col, header_row) and price_col > 1:
+        price_col -= 1
+    if qty_col == price_col and qty_col and qty_col > 1:
+        qty_col -= 1
+    if not qty_col and price_col and price_col > name_col + 1:
+        qty_col = price_col - 1
+    if not price_col:
+        price_col = first_header_col(headers, ["стоимость", "сумма"], ["ндс"])
+    if not qty_col or not price_col:
+        return []
+
+    items: list[SupplierItem] = []
+    for row in range(header_row + 1, ws.max_row + 1):
+        name = clean_text(ws.cell(row, name_col).value)
+        if not name or "итого" in name.lower() or "всего" in name.lower():
+            continue
+        price = parse_number(ws.cell(row, price_col).value)
+        total = parse_number(ws.cell(row, total_col).value) if total_col else None
+        qty = parse_quantity(ws.cell(row, qty_col).value, price, total)
+        if price is None and total is None:
+            continue
+        if qty is None and price is None:
+            continue
+        items.append(
+            SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=clean_text(ws.cell(row, pos_col).value) or str(row),
+                name=name,
+                qty=qty,
+                unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
+                price=price,
+                total=total,
+                invoice_no=invoice_no,
+            )
+        )
+    return items
+
+
 def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[SupplierItem]:
     wb = load_workbook(path, data_only=True)
     supplier = supplier or supplier_name_from_file(path)
@@ -1155,6 +1304,8 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             invoice_no=invoice_no,
                         )
                     )
+        if not items:
+            items.extend(read_loose_supplier_xlsx(ws, path, supplier, invoice_no))
     return items
 
 
@@ -1388,6 +1539,75 @@ def parse_fuzzy_ocr_pdf(lines: list[str], path: Path, supplier: str, invoice_no:
     return items
 
 
+def parse_generic_ocr_table_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    joined = clean_text(" ".join(lines)).lower()
+    if "смит" not in joined and "товар" not in joined:
+        return []
+
+    product_marker = re.compile(
+        r"(?:\bВК\b|\bПП\b|Кран|Муфта|Тройник|Труба|Уголок|Отвод|Заглушка|Клапан|Крестовина|"
+        r"Крепление|Болт|Винт|Гайка|Герметик|Грунтовка|Подводка)",
+        flags=re.IGNORECASE,
+    )
+    qty_pattern = re.compile(r"\b(?P<qty>\d{1,5})\s*(?:шт|шр|шо|ш\b|шт\.)", flags=re.IGNORECASE)
+    decimal_amount = re.compile(r"(?<!\d)\d{1,7}(?:[,.]\d{2})(?!\d)")
+
+    items: list[SupplierItem] = []
+    seen: set[tuple[str, float | None]] = set()
+    delivery = delivery_from_pdf_lines(lines)
+    for raw_line in lines:
+        line = clean_text(raw_line)
+        if not product_marker.search(line):
+            continue
+        compact = re.sub(r"[\[\]|_]+", " ", line)
+        compact = re.sub(r"\s+", " ", compact).strip()
+        qty_match = qty_pattern.search(compact)
+        if not qty_match:
+            continue
+        marker_match = product_marker.search(compact[: qty_match.start()])
+        if not marker_match:
+            continue
+
+        name = clean_text(compact[marker_match.start() : qty_match.start()])
+        name = re.sub(r"^\d{1,3}\s*\d{3,6}\s+", "", name)
+        name = re.sub(r"^\d{3,6}\s+", "", name)
+        name = name.strip(" -—Г")
+        if len(name) < 6:
+            continue
+
+        qty = parse_number(qty_match.group("qty"))
+        tail = compact[qty_match.end() :]
+        amounts = [parse_amount_token(value) for value in decimal_amount.findall(tail)]
+        amounts = [value for value in amounts if value is not None and value > 0]
+        if not amounts:
+            continue
+
+        total = amounts[-1]
+        price = amounts[0]
+        if qty and total and (not price or price > total or abs(price * qty - total) > max(total * 0.35, 100)):
+            price = round(total / qty, 4)
+
+        key = (name.lower(), round(total, 2) if total is not None else None)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(
+            SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=str(len(items) + 1),
+                name=name,
+                qty=qty,
+                unit="шт",
+                price=price,
+                total=total,
+                delivery=delivery,
+                invoice_no=invoice_no,
+            )
+        )
+    return items
+
+
 def parse_sib_k_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
     items: list[SupplierItem] = []
     delivery = delivery_from_pdf_lines(lines)
@@ -1538,6 +1758,9 @@ def parse_known_text_pdf(lines: list[str], path: Path, supplier: str, invoice_no
         items = parse_sib_k_pdf(lines, path, supplier, invoice_no)
         if items:
             return items
+    items = parse_generic_ocr_table_pdf(lines, path, supplier, invoice_no)
+    if items:
+        return items
     return parse_fuzzy_ocr_pdf(lines, path, supplier, invoice_no)
 
 
@@ -1919,6 +2142,9 @@ def improve_matches_with_deepseek(
             if not request_pos or request_pos not in by_pos or confidence < 0.22:
                 continue
             old = updated[offer_id]
+            if product_types_incompatible(by_pos[request_pos].name, old.supplier_item.name):
+                updated[offer_id] = Match(old.supplier_item, None, 0, "unmatched", "несовместимые товарные категории")
+                continue
             reason = clean_text(item.get("reason") or "")
             alt_text = "; ".join(
                 f"{pos} ({round(conf * 100)}%)" for pos, conf, _ in alternatives if pos != request_pos

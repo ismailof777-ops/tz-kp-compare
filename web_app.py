@@ -1516,8 +1516,8 @@ def page(title: str, body: str) -> bytes:
           requestInput && requestInput.focus();
           return;
         }}
-        if (!offersInput || offersInput.files.length < 2) {{
-          showMessage('Выберите минимум два КП или счета поставщиков.');
+        if (!offersInput || offersInput.files.length < 1) {{
+          showMessage('Выберите КП или счет поставщика.');
           offersInput && offersInput.focus();
           return;
         }}
@@ -1839,13 +1839,13 @@ def render_home(error: str = "") -> bytes:
     <div class="field">
       <div class="field-head">
         <h3>КП / счета поставщиков</h3>
-        <p>Добавьте два или больше КП или счетов от поставщиков.</p>
+        <p>Добавьте один или несколько КП или счетов от поставщиков. Для сравнения минимальных цен загрузите два и более файла.</p>
       </div>
       <div class="file-drop" data-drop-zone>
         <input class="file-input" id="offers" name="offers" type="file" accept=".xlsx,.pdf,.xls" multiple required>
         <span class="file-icon">↑</span>
         <span class="file-title">Перетащите КП или счета сюда</span>
-        <span class="file-subtitle">или выберите несколько файлов</span>
+        <span class="file-subtitle">или выберите один или несколько файлов</span>
         <span class="file-pick">Выбрать файлы</span>
         <span class="file-support">Поддерживаются .xlsx и текстовые PDF</span>
       </div>
@@ -2214,8 +2214,8 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_process_error("Загрузите файл заявки .xlsx.")
             return
         offer_fields = [field for field in offer_fields if field.filename]
-        if len(offer_fields) < 2:
-            self.send_process_error("Загрузите минимум два КП или счета.")
+        if len(offer_fields) < 1:
+            self.send_process_error("Загрузите КП или счет поставщика.")
             return
 
         run_id = uuid.uuid4().hex[:12]
@@ -2263,7 +2263,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         if parsed_items:
                             supplier_items.extend(parsed_items)
                         else:
-                            errors.append(f"{offer_path.name}: позиции КП не найдены. Возможно, это скан или нестандартный PDF.")
+                            errors.append(f"{offer_path.name}: позиции КП не найдены. Проверьте, что в файле есть таблица с наименованием, количеством и ценой. Для сканов и файлов после ручного CSV-конвертирования структура таблицы может съехать.")
                     except Exception as exc:  # noqa: BLE001
                         errors.append(str(exc))
 

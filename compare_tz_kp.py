@@ -1029,6 +1029,12 @@ def read_request_xlsx(path: Path) -> list[RequestItem]:
     if not found:
         found = find_header_row(ws, ["позици", "ед."])
     if not found:
+        found = find_header_row(ws, ["наименование", "кол-во"])
+    if not found:
+        found = find_header_row(ws, ["наименование", "ед."])
+    if not found:
+        found = find_header_row(ws, ["наименование", "количество"])
+    if not found:
         raise ValueError(f"Не нашел строку заголовков заявки в {path.name}")
 
     header_row, _ = found

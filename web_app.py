@@ -916,7 +916,7 @@ a:hover {
 table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 1280px;
+  min-width: 1520px;
   font-size: 13px;
 }
 th, td {
@@ -954,8 +954,8 @@ td.small, th.small { width: 118px; }
   position: sticky;
   left: 118px;
   z-index: 2;
-  width: 390px;
-  min-width: 390px;
+  width: 620px;
+  min-width: 620px;
   background: #fff;
   box-shadow: 10px 0 18px rgba(15, 23, 42, 0.05);
 }
@@ -966,6 +966,7 @@ td.small, th.small { width: 118px; }
 }
 .review-table .match-input {
   min-width: 0;
+  font-size: 14px;
 }
 .review-table .compact-input {
   width: 96px;
@@ -1913,7 +1914,7 @@ def render_review(run_id: str) -> bytes:
         if match.status != "service" and (match.status != "auto" or not match.request_pos or match.reason)
     ]
     request_options = "\n".join(
-        f'<option value="{esc(item.pos)} - {esc(item.name[:110])}" data-full="{esc(item.pos)} - {esc(item.name)}"></option>'
+        f'<option value="{esc(item.pos)} - {esc(item.name)}" data-full="{esc(item.pos)} - {esc(item.name)}"></option>'
         for item in request_items
     )
     unit_options = "".join(f'<option value="{unit}"></option>' for unit in ["м2", "м3", "шт", "п.м", "м", "кг", "т", "упак"])
@@ -1921,14 +1922,14 @@ def render_review(run_id: str) -> bytes:
     rows_html = ""
     for idx, match in review_rows:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
-        selected_value = f"{selected_item.pos} - {selected_item.name[:110]}" if selected_item else ""
+        selected_value = f"{selected_item.pos} - {selected_item.name}" if selected_item else ""
         selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
         suggestion_buttons = ""
         suggestions = top_request_suggestions(match, request_items)
         if suggestions:
             suggestion_buttons = '<div class="suggestions" aria-label="Варианты сопоставления">'
             for suggestion, score in suggestions:
-                value = f"{suggestion.pos} - {suggestion.name[:110]}"
+                value = f"{suggestion.pos} - {suggestion.name}"
                 full = f"{suggestion.pos} - {suggestion.name}"
                 suggestion_buttons += (
                     f'<button class="suggestion" type="button" data-suggest="{esc(value)}" '

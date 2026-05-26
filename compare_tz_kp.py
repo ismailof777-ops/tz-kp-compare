@@ -186,6 +186,8 @@ class SupplierItem:
     total: float | None = None
     delivery: str = ""
     invoice_no: str = ""
+    override_qty: float | None = None
+    override_unit: str = ""
 
 
 @dataclass
@@ -894,6 +896,18 @@ def lumber_quantity_check(request: RequestItem, offer: SupplierItem) -> Quantity
 
 def quantity_check(request: RequestItem, offer: SupplierItem) -> QuantityCheck:
     original = f"{fmt_qty(offer.qty)} {offer.unit}".strip()
+    if offer.override_qty is not None and offer.override_qty > 0 and offer.override_unit:
+        display = f"{original}\n~ {fmt_quantity_value(offer.override_qty)} {offer.override_unit}".strip()
+        req_unit = normalized_unit(request.unit)
+        override_unit = normalized_unit(offer.override_unit)
+        if request.qty is None or req_unit != override_unit:
+            return QuantityCheck("unknown", display, offer.override_qty, override_unit)
+        tolerance = max(0.01, request.qty * 0.02)
+        if abs(request.qty - offer.override_qty) <= tolerance:
+            return QuantityCheck("ok", display, offer.override_qty, override_unit)
+        if offer.override_qty < request.qty:
+            return QuantityCheck("low", display, offer.override_qty, override_unit)
+        return QuantityCheck("high", display, offer.override_qty, override_unit)
     if request.qty is None or offer.qty is None:
         return QuantityCheck("unknown", original)
     lumber_check = lumber_quantity_check(request, offer)
@@ -2271,6 +2285,8 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
         "Ед.",
         "Цена",
         "Сумма",
+        "Общий объем для сравнения",
+        "Ед. сравнения",
         "Уверенность",
         "Причина",
         "Источник",
@@ -2291,6 +2307,8 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
                 match.supplier_item.unit,
                 match.supplier_item.price,
                 match.supplier_item.total,
+                match.supplier_item.override_qty,
+                match.supplier_item.override_unit,
                 round(match.score, 3),
                 match.reason,
                 match.supplier_item.source,
@@ -2299,7 +2317,7 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
     style_sheet(ws)
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    widths = [14, 22, 48, 22, 12, 62, 12, 8, 12, 14, 12, 34, 32]
+    widths = [14, 22, 48, 22, 12, 62, 12, 8, 12, 14, 18, 12, 12, 34, 32]
     for idx, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
     wb.save(path)
@@ -2315,7 +2333,7 @@ def read_review_overrides(path: Path) -> dict[tuple[str, str, str], str | None]:
         request_pos = clean_text(row[1])
         supplier = clean_text(row[3])
         row_no = clean_text(row[4])
-        source = clean_text(row[12])
+        source = clean_text(row[14] if len(row) > 14 else row[12])
         key = (supplier, row_no, source)
         if request_pos.lower() in {"", "-", "нет", "skip", "не сравнивать"}:
             overrides[key] = None
@@ -2380,6 +2398,12 @@ def fmt_price_value(value: float | None) -> str:
 def normalized_unit_price(request: RequestItem, offer: SupplierItem) -> tuple[float | None, str | float | None]:
     if offer.price is None:
         return None, offer.price
+    if offer.override_qty is not None and offer.override_qty > 0 and offer.override_unit:
+        total = offer_total_value(offer)
+        if total is not None:
+            price = total / offer.override_qty
+            display = f"{fmt_price_value(offer.price)}\n~ {fmt_price_value(price)}/{offer.override_unit}".strip()
+            return price, display
     converted_qty, converted_unit = converted_quantity(request, offer)
     req_unit = normalized_unit(request.unit)
     offer_unit = normalized_unit(offer.unit)

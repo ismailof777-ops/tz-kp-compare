@@ -11,7 +11,7 @@ import shutil
 import sys
 import threading
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,6 +25,7 @@ from compare_tz_kp import (
     clean_text,
     get_ai_warnings,
     match_score,
+    parse_number,
     read_offer,
     read_request_xlsx,
     status_label,
@@ -915,7 +916,7 @@ a:hover {
 table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 1080px;
+  min-width: 1280px;
   font-size: 13px;
 }
 th, td {
@@ -965,6 +966,25 @@ td.small, th.small { width: 118px; }
 }
 .review-table .match-input {
   min-width: 0;
+}
+.review-table .compact-input {
+  width: 96px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: 600 13px/1.2 var(--font-sans);
+  color: var(--text);
+  background: #fff;
+}
+.review-table .unit-input {
+  width: 74px;
+}
+.review-table .norm-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
 }
 .status {
   display: inline-flex;
@@ -1700,6 +1720,8 @@ def supplier_item_from_dict(data: dict) -> SupplierItem:
         total=data.get("total"),
         delivery=clean_text(data.get("delivery")),
         invoice_no=clean_text(data.get("invoice_no")),
+        override_qty=data.get("override_qty"),
+        override_unit=clean_text(data.get("override_unit")),
     )
 
 
@@ -1894,6 +1916,7 @@ def render_review(run_id: str) -> bytes:
         f'<option value="{esc(item.pos)} - {esc(item.name[:110])}" data-full="{esc(item.pos)} - {esc(item.name)}"></option>'
         for item in request_items
     )
+    unit_options = "".join(f'<option value="{unit}"></option>' for unit in ["м2", "м3", "шт", "п.м", "м", "кг", "т", "упак"])
     warning_html = "".join(f'<div class="notice warn">{esc(error)}</div>' for error in errors)
     rows_html = ""
     for idx, match in review_rows:
@@ -1930,6 +1953,13 @@ def render_review(run_id: str) -> bytes:
   <td class="small">{esc(match.supplier_item.row_no)}</td>
   <td class="with-tooltip" title="{esc(match.supplier_item.name)}">{esc(match.supplier_item.name)}</td>
   <td class="small">{esc(match.supplier_item.qty)} {esc(match.supplier_item.unit)}</td>
+  <td class="small">
+    <input class="compact-input" type="text" name="norm_qty_{idx}" value="{esc(match.supplier_item.override_qty if match.supplier_item.override_qty is not None else "")}" placeholder="40,698">
+    <span class="norm-hint">если нужно пересчитать</span>
+  </td>
+  <td class="small">
+    <input class="compact-input unit-input" type="text" name="norm_unit_{idx}" list="unit-options" value="{esc(match.supplier_item.override_unit)}" placeholder="м3">
+  </td>
   <td class="small">{esc(match.supplier_item.price)}</td>
   <td>{esc(match.reason or "проверить совпадение")}</td>
 </tr>"""
@@ -1940,6 +1970,9 @@ def render_review(run_id: str) -> bytes:
   <datalist id="request-options">
     {request_options}
   </datalist>
+  <datalist id="unit-options">
+    {unit_options}
+  </datalist>
   <div class="review-card">
     <div class="review-card-head">
       <div>
@@ -1948,7 +1981,7 @@ def render_review(run_id: str) -> bytes:
       </div>
       <span class="review-badge">{len(review_rows)} к проверке</span>
     </div>
-    <div class="notice warn">Процент рядом с подсказкой показывает похожесть позиции КП на позицию заявки. Слабые совпадения отправляются на проверку, а не подтверждаются автоматически.</div>
+    <div class="notice warn">Процент рядом с подсказкой показывает похожесть позиции КП на позицию заявки. Если КП указано в штуках/упаковках, а сравнивать нужно по м2 или м3, заполните поля "Объем" и "Ед." - итоговый Excel пересчитает цену за эту единицу.</div>
     <div class="table-wrap">
       <table class="review-table">
         <thead>
@@ -1959,6 +1992,8 @@ def render_review(run_id: str) -> bytes:
             <th class="small">Строка</th>
             <th>Позиция КП</th>
             <th class="small">Кол-во</th>
+            <th class="small">Объем</th>
+            <th class="small">Ед.</th>
             <th class="small">Цена</th>
             <th>Причина</th>
           </tr>
@@ -2318,14 +2353,21 @@ class AppHandler(BaseHTTPRequestHandler):
         updated: list[Match] = []
         for idx, match in enumerate(matches):
             field_name = f"match_{idx}"
+            norm_qty = parse_number(form.get(f"norm_qty_{idx}", [""])[0])
+            norm_unit = clean_text(form.get(f"norm_unit_{idx}", [""])[0])
+            supplier_item = match.supplier_item
+            if norm_qty is not None and norm_qty > 0 and norm_unit:
+                supplier_item = replace(supplier_item, override_qty=norm_qty, override_unit=norm_unit)
+            elif f"norm_qty_{idx}" in form or f"norm_unit_{idx}" in form:
+                supplier_item = replace(supplier_item, override_qty=None, override_unit="")
             if field_name in form:
                 request_pos = resolve_request_pos(form[field_name][0], request_items)
                 if request_pos:
-                    updated.append(Match(match.supplier_item, request_pos, match.score, "manual", "подтверждено на проверке"))
+                    updated.append(Match(supplier_item, request_pos, match.score, "manual", "подтверждено на проверке"))
                 else:
-                    updated.append(Match(match.supplier_item, None, match.score, "unmatched", "оставлено без сопоставления"))
+                    updated.append(Match(supplier_item, None, match.score, "unmatched", "оставлено без сопоставления"))
             else:
-                updated.append(match)
+                updated.append(Match(supplier_item, match.request_pos, match.score, match.status, match.reason))
 
         write_review(run_dir / "review.xlsx", updated, request_items)
         write_final(run_dir / "summary.xlsx", request_items, updated)

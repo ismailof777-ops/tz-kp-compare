@@ -130,6 +130,10 @@ body {
   margin: 0 auto;
   padding: 44px 0 44px;
 }
+.shell.is-wide {
+  width: min(1760px, calc(100% - 24px));
+  padding-top: 24px;
+}
 .topbar {
   display: flex;
   align-items: flex-start;
@@ -830,6 +834,10 @@ a:hover {
   background: #fff;
   box-shadow: var(--shadow);
 }
+.review-page .table-wrap {
+  max-height: calc(100vh - 330px);
+  min-height: 58vh;
+}
 .review-form {
   display: grid;
   gap: 18px;
@@ -886,6 +894,11 @@ a:hover {
   padding: 16px;
   box-shadow: var(--shadow);
 }
+.review-page .review-actionbar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 20;
+}
 .review-actionbar .actions {
   margin-top: 0;
   justify-content: flex-end;
@@ -935,6 +948,9 @@ table {
   width: 100%;
   min-width: 1520px;
   font-size: 13px;
+}
+.review-page table {
+  min-width: 1460px;
 }
 th, td {
   border-bottom: 1px solid var(--line);
@@ -1217,6 +1233,7 @@ td.small, th.small { width: 118px; }
   .site-header { width: min(100% - 24px, 1180px); padding-top: 14px; }
   .header-links { gap: 10px; }
   .shell { width: min(100% - 24px, 1180px); padding-top: 26px; }
+  .shell.is-wide { width: min(100% - 16px, 1180px); }
   .topbar, .grid, .home-layout { display: block; }
   .home-layout { display: flex; flex-direction: column; }
   .grid { order: 1; }
@@ -1302,7 +1319,8 @@ def get_ai_job(run_id: str) -> dict[str, object]:
         return payload
 
 
-def page(title: str, body: str) -> bytes:
+def page(title: str, body: str, wide: bool = False) -> bytes:
+    shell_class = "shell is-wide" if wide else "shell"
     html_doc = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -1322,7 +1340,7 @@ def page(title: str, body: str) -> bytes:
       <a href="/privacy">Политика</a>
     </nav>
   </header>
-  <main class="shell">{body}</main>
+  <main class="{shell_class}">{body}</main>
   <footer class="site-footer">
     <span>© approvemoscow.ru</span>
     <a href="/privacy">Политика обработки персональных данных</a>
@@ -2052,6 +2070,7 @@ def render_review(run_id: str) -> bytes:
 </div>"""
 
     body = f"""
+<div class="review-page">
 <div class="topbar">
   <div>
     <h1>Проверка совпадений</h1>
@@ -2075,8 +2094,9 @@ def render_review(run_id: str) -> bytes:
   <div><b>Подсказки</b> - варианты под полем показывают возможные совпадения. Чем выше процент, тем вероятнее совпадение.</div>
 </div>
 {review_html}
+  </div>
 """
-    return page("Проверка совпадений", body)
+    return page("Проверка совпадений", body, wide=True)
 
 
 def render_done(run_id: str) -> bytes:

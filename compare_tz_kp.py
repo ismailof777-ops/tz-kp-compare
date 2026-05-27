@@ -1410,6 +1410,109 @@ def money_values_from_text(text: str) -> list[float]:
     return values
 
 
+def first_amount_from_text(text: str) -> float | None:
+    match = re.search(r"\d[\d\s]*(?:[,.]\d{2})", clean_text(text))
+    if not match:
+        return None
+    return parse_amount_token(match.group(0))
+
+
+def looks_like_unit_token(text: str) -> bool:
+    lower = clean_text(text).lower()
+    return any(unit in lower for unit in ["шт", "м", "кг", "уп", "комп", "усл"])
+
+
+def is_offer_note_line(text: str) -> bool:
+    lower = clean_text(text).lower()
+    if not lower:
+        return True
+    note_markers = [
+        "в наличии",
+        "под заказ",
+        "кратно",
+        "адрес доставки",
+        "итого",
+        "ндс",
+        "счет-договор",
+        "продолжение",
+        "страница",
+        "наименование",
+        "кол-во",
+        "срок",
+        "цена",
+        "сумма",
+        "(дни)",
+        "(руб)",
+    ]
+    return any(marker in lower for marker in note_markers)
+
+
+def parse_split_pdf_table(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
+    items: list[SupplierItem] = []
+    current: SupplierItem | None = None
+    delivery = delivery_from_pdf_lines(lines)
+
+    def flush_current() -> None:
+        nonlocal current
+        if current and current.name and "доставка" not in current.name.lower():
+            items.append(current)
+        current = None
+
+    for raw_line in lines:
+        parts = [part for part in re.split(r"\s{2,}", raw_line.strip()) if part]
+        if not parts:
+            continue
+
+        if parts[0].isdigit() and len(parts) >= 6:
+            row_no = parts[0]
+            name = clean_pdf_name_line(parts[1])
+            if not name or "доставка" in name.lower():
+                flush_current()
+                continue
+
+            qty: float | None = None
+            unit = ""
+            price: float | None = None
+            total: float | None = None
+
+            if len(parts) >= 9 and looks_like_unit_token(parts[3]) and first_amount_from_text(parts[5]) is not None:
+                unit = clean_text(parts[3]).rstrip(".")
+                price = first_amount_from_text(parts[5])
+                total = first_amount_from_text(parts[8]) or first_amount_from_text(parts[6])
+                qty = parse_quantity(parts[4], price, total)
+            elif looks_like_unit_token(parts[3]) and first_amount_from_text(parts[-2]) is not None and first_amount_from_text(parts[-1]) is not None:
+                unit = clean_text(parts[3]).rstrip(".")
+                price = first_amount_from_text(parts[-2])
+                total = first_amount_from_text(parts[-1])
+                qty = parse_quantity(parts[2], price, total)
+
+            if price is None and total is None:
+                continue
+
+            flush_current()
+            current = SupplierItem(
+                supplier=supplier,
+                source=path.name,
+                row_no=row_no,
+                name=name,
+                qty=qty,
+                unit=unit,
+                price=price,
+                total=total,
+                delivery=delivery,
+                invoice_no=invoice_no,
+            )
+            continue
+
+        if current and not is_offer_note_line(raw_line):
+            continuation = clean_pdf_name_line(raw_line)
+            if continuation and not re.match(r"^\d+\s+", continuation):
+                current.name = clean_text(f"{current.name} {continuation}")
+
+    flush_current()
+    return items
+
+
 OCR_PRODUCT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("Блок ввода и узла учета тепловой энергии", re.compile(r"блок\s+ввода", re.IGNORECASE)),
     ("Блок системы ГВС", re.compile(r"блок\s+системы\s+гвс", re.IGNORECASE)),
@@ -1904,6 +2007,10 @@ def parse_layout_pdf(path: Path, supplier: str | None = None) -> list[SupplierIt
     if not any(clean_text(line) for line in lines):
         lines = ocr_pdf_lines(path)
     invoice_no = invoice_no_from_text(" ".join(lines[:35]), path.name)
+
+    split_items = parse_split_pdf_table(lines, path, supplier, invoice_no)
+    if len(split_items) >= 3:
+        return split_items
 
     delivery = delivery_from_pdf_lines(lines)
 

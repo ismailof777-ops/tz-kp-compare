@@ -1032,9 +1032,7 @@ def find_column_preferred(
     return fallback
 
 
-def read_request_xlsx(path: Path) -> list[RequestItem]:
-    wb = load_workbook(path, data_only=True)
-    ws = wb.active
+def read_request_sheet(ws) -> list[RequestItem] | None:
     found = find_header_row(ws, ["описание", "количество"])
     if not found:
         found = find_header_row(ws, ["описание", "объем"])
@@ -1049,17 +1047,17 @@ def read_request_xlsx(path: Path) -> list[RequestItem]:
     if not found:
         found = find_header_row(ws, ["наименование", "количество"])
     if not found:
-        raise ValueError(f"Не нашел строку заголовков заявки в {path.name}")
+        return None
 
     header_row, _ = found
     pos_col = find_column(ws, header_row, ["№", "номер"]) or 1
     name_col = find_column(ws, header_row, ["описание закупаемой", "описание", "позици", "наименование", "товар"])
     specs_col = find_column(ws, header_row, ["технические характеристики", "гост"])
-    unit_col = find_column(ws, header_row, ["ед. измерения", "ед измерения", "ед. из", "ед из", "ед."])
-    qty_col = find_column(ws, header_row, ["необходимый объем", "количество", "кол-во", "кол во"])
+    unit_col = find_column(ws, header_row, ["единица измерения", "единицы измерения", "ед. измерения", "ед измерения", "ед. из", "ед из", "ед."])
+    qty_col = find_column(ws, header_row, ["необходимый объем", "количество", "кол-во", "кол во", "кол-во."])
 
     if not name_col or not qty_col:
-        raise ValueError(f"Не нашел колонки описания/количества в заявке {path.name}")
+        return None
 
     items: list[RequestItem] = []
     for row in range(header_row + 1, ws.max_row + 1):
@@ -1075,7 +1073,16 @@ def read_request_xlsx(path: Path) -> list[RequestItem]:
         if not pos:
             pos = str(len(items) + 1)
         items.append(RequestItem(pos=pos, name=name, specs=specs, unit=unit, qty=qty))
-    return items
+    return items or None
+
+
+def read_request_xlsx(path: Path) -> list[RequestItem]:
+    wb = load_workbook(path, data_only=True)
+    for ws in wb.worksheets:
+        items = read_request_sheet(ws)
+        if items:
+            return items
+    raise ValueError(f"Не нашел строку заголовков заявки в {path.name}")
 
 
 def supplier_name_from_file(path: Path) -> str:

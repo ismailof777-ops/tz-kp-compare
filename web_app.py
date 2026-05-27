@@ -17,6 +17,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+
 from compare_tz_kp import (
     Match,
     RequestItem,
@@ -418,6 +422,19 @@ input[type="search"]:focus {
 .file-support {
   color: var(--muted);
   font-size: 12px;
+}
+.template-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.template-link:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
 }
 .file-list {
   position: relative;
@@ -1857,6 +1874,7 @@ def render_home(error: str = "") -> bytes:
         <span class="file-pick">Выбрать файл</span>
         <span class="file-support">Поддерживается .xlsx</span>
       </div>
+      <a class="template-link" href="/template/request.xlsx">Скачать шаблон заявки</a>
       <div class="file-list" data-file-list="request">Файл пока не выбран.</div>
     </div>
     <div class="field">
@@ -2146,6 +2164,57 @@ def render_privacy() -> bytes:
     return page("Политика обработки персональных данных", body)
 
 
+def build_request_template() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Заявка"
+
+    ws.merge_cells("A1:D1")
+    ws["A1"] = "ЗАЯВКА НА ПОСТАВКУ ТМЦ, РАБОТ, УСЛУГ"
+    ws["A1"].font = Font(bold=True, size=14, color="0F172A")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 24
+
+    ws["A3"] = "Дата подачи заявки:"
+    ws["B3"] = ""
+
+    headers = ["№", "Наименование", "Единица измерения", "Количество"]
+    samples = [
+        [1, "Наружный блок LESSAR LSR-ASU15HRN", "шт.", 1],
+        [2, "Труба медная Ø41.3", "м.", 10],
+        [3, "Утеплитель KNAUF Insulation Акустик 1250*610*50", "м2", 566],
+    ]
+    header_fill = PatternFill("solid", fgColor="E2E8F0")
+    border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+
+    for col, value in enumerate(headers, start=1):
+        cell = ws.cell(4, col, value)
+        cell.font = Font(bold=True, color="0F172A")
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for row_idx, row in enumerate(samples, start=5):
+        for col_idx, value in enumerate(row, start=1):
+            cell = ws.cell(row_idx, col_idx, value)
+            cell.border = border
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    widths = [8, 62, 18, 14]
+    for col_idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    ws.freeze_panes = "A5"
+    stream = io.BytesIO()
+    wb.save(stream)
+    return stream.getvalue()
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "TZKP/0.1"
 
@@ -2161,6 +2230,15 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_file_bytes(self, data: bytes, content_type: str, filename: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
@@ -2187,6 +2265,13 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if path == "/privacy":
             self.send_html(render_privacy())
+            return
+        if path == "/template/request.xlsx":
+            self.send_file_bytes(
+                build_request_template(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "request_template.xlsx",
+            )
             return
         if path.startswith("/review/"):
             run_id = safe_filename(unquote(path.removeprefix("/review/")), "run")

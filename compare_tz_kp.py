@@ -1047,6 +1047,10 @@ def read_request_sheet(ws) -> list[RequestItem] | None:
     if not found:
         found = find_header_row(ws, ["наименование", "количество"])
     if not found:
+        found = find_header_row(ws, ["наименование", "количесв"])
+    if not found:
+        found = find_header_row(ws, ["наименование", "единиц"])
+    if not found:
         return None
 
     header_row, _ = found
@@ -1054,7 +1058,7 @@ def read_request_sheet(ws) -> list[RequestItem] | None:
     name_col = find_column(ws, header_row, ["описание закупаемой", "описание", "позици", "наименование", "товар"])
     specs_col = find_column(ws, header_row, ["технические характеристики", "гост"])
     unit_col = find_column(ws, header_row, ["единица измерения", "единицы измерения", "ед. измерения", "ед измерения", "ед. из", "ед из", "ед."])
-    qty_col = find_column(ws, header_row, ["необходимый объем", "количество", "кол-во", "кол во", "кол-во."])
+    qty_col = find_column(ws, header_row, ["необходимый объем", "количество", "количесвто", "количесв", "кол-во", "кол во", "кол-во."])
 
     if not name_col or not qty_col:
         return None

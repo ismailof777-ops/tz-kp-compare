@@ -1867,12 +1867,12 @@ def render_home(error: str = "") -> bytes:
         <p>Загрузите Excel-файл со списком позиций, количеством и единицами измерения.</p>
       </div>
       <div class="file-drop" data-drop-zone>
-        <input class="file-input" id="request" name="request" type="file" accept=".xlsx" required>
+        <input class="file-input" id="request" name="request" type="file" accept=".xlsx,.pdf" required>
         <span class="file-icon">↑</span>
         <span class="file-title">Перетащите файл заявки сюда</span>
-        <span class="file-subtitle">или выберите .xlsx на компьютере</span>
+        <span class="file-subtitle">или выберите .xlsx/PDF на компьютере</span>
         <span class="file-pick">Выбрать файл</span>
-        <span class="file-support">Поддерживается .xlsx</span>
+        <span class="file-support">Поддерживается .xlsx. Для сравнения двух КП можно загрузить сюда первый КП .xlsx/PDF.</span>
       </div>
       <a class="template-link" href="/template/request.xlsx">Скачать шаблон заявки</a>
       <div class="file-list" data-file-list="request">Файл пока не выбран.</div>
@@ -2215,6 +2215,49 @@ def build_request_template() -> bytes:
     return stream.getvalue()
 
 
+def supplier_items_to_request_items(items: list[SupplierItem]) -> list[RequestItem]:
+    request_items: list[RequestItem] = []
+    for idx, item in enumerate(items, start=1):
+        name = clean_text(item.name)
+        if not name:
+            continue
+        request_items.append(
+            RequestItem(
+                pos=item.row_no or str(idx),
+                name=name,
+                unit=item.unit,
+                qty=item.qty,
+            )
+        )
+    return request_items
+
+
+def read_request_or_base_offer(path: Path) -> tuple[list[RequestItem], list[SupplierItem]]:
+    try:
+        request_items = read_request_xlsx(path)
+        try:
+            base_items = read_offer(path)
+        except Exception:  # noqa: BLE001
+            base_items = []
+        return request_items, base_items
+    except Exception as request_exc:  # noqa: BLE001
+        try:
+            base_items = read_offer(path)
+        except Exception as offer_exc:  # noqa: BLE001
+            raise ValueError(
+                f"{path.name}: не удалось прочитать файл как заявку или КП. "
+                "Для заявки используйте .xlsx с колонками Наименование, Единица измерения, Количество. "
+                "Для сравнения двух КП загрузите первый КП в поле заявки, второй - в поле КП."
+            ) from offer_exc
+
+        request_items = supplier_items_to_request_items(base_items)
+        if not request_items:
+            raise ValueError(
+                f"{path.name}: не нашел позиции. Проверьте, что в файле есть таблица с наименованием, количеством и ценой."
+            ) from request_exc
+        return request_items, base_items
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "TZKP/0.1"
 
@@ -2373,9 +2416,9 @@ class AppHandler(BaseHTTPRequestHandler):
         def worker() -> None:
             try:
                 update_progress(8, "Читаем файл заявки")
-                request_items = read_request_xlsx(request_path)
+                request_items, base_supplier_items = read_request_or_base_offer(request_path)
 
-                supplier_items: list[SupplierItem] = []
+                supplier_items: list[SupplierItem] = list(base_supplier_items)
                 errors: list[str] = []
                 for idx, offer_path in enumerate(offer_paths, start=1):
                     update_progress(12 + round((idx - 1) / max(1, len(offer_paths)) * 24), f"Извлекаем позиции КП: файл {idx} из {len(offer_paths)}")

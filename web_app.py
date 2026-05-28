@@ -1908,6 +1908,7 @@ def render_home(error: str = "") -> bytes:
         <span class="file-pick">Выбрать файлы</span>
         <span class="file-support">Поддерживаются .xlsx, .xls и текстовые PDF</span>
       </div>
+      <a class="template-link" href="/template/offer.xlsx">Скачать шаблон КП</a>
       <div class="file-list files-list" data-file-list="offers">Файлы пока не выбраны.</div>
     </div>
     <div class="consent-field">
@@ -2235,6 +2236,110 @@ def build_request_template() -> bytes:
     return stream.getvalue()
 
 
+def build_offer_template() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "КП поставщика"
+
+    ws.merge_cells("A1:L1")
+    ws["A1"] = "ЭТАЛОННАЯ ФОРМА КП / СЧЕТА ПОСТАВЩИКА"
+    ws["A1"].font = Font(bold=True, size=14, color="0F172A")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 24
+
+    ws["A2"] = "Заполните строки ниже. Зеленые колонки обязательны для стабильного сопоставления."
+    ws["A2"].font = Font(color="64748B")
+    ws.merge_cells("A2:L2")
+
+    headers = [
+        "№",
+        "Артикул / код",
+        "Наименование позиции",
+        "Количество",
+        "Ед. изм.",
+        "Цена за единицу, руб.",
+        "Сумма, руб.",
+        "Поставщик",
+        "ИНН поставщика",
+        "Срок поставки",
+        "Доставка / услуги",
+        "Комментарий",
+    ]
+    samples = [
+        [1, "sak-2.5-35", "Заглушка для JXB-2,5/35 EKF PROxima", 1, "шт", 10.47, "=D5*F5", "ООО Поставщик", "7700000000", "2-3 дня", "", ""],
+        [2, "118035", "Заглушка модульная OptiBox P-ZM-1-WHITE", 2, "шт", 35.87, "=D6*F6", "ООО Поставщик", "7700000000", "2-3 месяца", "", ""],
+        [3, "", "Утеплитель минераловатный 200х400х600", 40.698, "м3", 3949.00, "=D7*F7", "ООО Поставщик", "7700000000", "в наличии", "", "Если в счете шт., можно привести к м2/м3 вручную"],
+        [4, "", "Доставка до объекта", 1, "усл", 2500.00, "=D8*F8", "ООО Поставщик", "7700000000", "", "да", "Услуги и доставка можно указывать отдельной строкой"],
+    ]
+
+    header_fill = PatternFill("solid", fgColor="E2E8F0")
+    required_fill = PatternFill("solid", fgColor="ECFDF5")
+    border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+
+    for col, value in enumerate(headers, start=1):
+        cell = ws.cell(4, col, value)
+        cell.font = Font(bold=True, color="0F172A")
+        cell.fill = required_fill if col in {3, 4, 5, 6, 7} else header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for row_idx, row in enumerate(samples, start=5):
+        for col_idx, value in enumerate(row, start=1):
+            cell = ws.cell(row_idx, col_idx, value)
+            cell.border = border
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            if col_idx in {4, 6, 7}:
+                cell.number_format = '#,##0.00'
+
+    for row_idx in range(9, 109):
+        ws.cell(row_idx, 1, f"=IF(C{row_idx}<>\"\",ROW()-4,\"\")")
+        ws.cell(row_idx, 7, f"=IF(AND(D{row_idx}<>\"\",F{row_idx}<>\"\"),D{row_idx}*F{row_idx},\"\")")
+        for col_idx in range(1, 13):
+            cell = ws.cell(row_idx, col_idx)
+            cell.border = border
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        for col_idx in {4, 6, 7}:
+            ws.cell(row_idx, col_idx).number_format = '#,##0.00'
+
+    ws["F110"] = "Итого:"
+    ws["F110"].font = Font(bold=True)
+    ws["G110"] = "=SUM(G5:G109)"
+    ws["G110"].font = Font(bold=True)
+    ws["G110"].number_format = '#,##0.00'
+
+    widths = [7, 18, 58, 14, 12, 18, 16, 24, 16, 16, 18, 32]
+    for col_idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    ws.freeze_panes = "A5"
+    ws.auto_filter.ref = "A4:L109"
+
+    guide = wb.create_sheet("Инструкция")
+    guide["A1"] = "Как заполнять КП"
+    guide["A1"].font = Font(bold=True, size=14, color="0F172A")
+    guide_rows = [
+        ("Наименование позиции", "Пишите полное название из КП или счета. Размеры, марку и характеристики лучше не удалять."),
+        ("Количество", "Указывайте число. Дробные значения можно писать через запятую или точку."),
+        ("Ед. изм.", "Используйте привычные единицы: шт, м2, м3, м, п.м, кг, т, компл, усл."),
+        ("Цена и сумма", "Если известна цена за единицу, сумма посчитается автоматически. Если есть только сумма, можно заполнить сумму вручную."),
+        ("Поставщик и ИНН", "Желательно указывать, чтобы в истории закупок было понятно, кто участвовал и кто был дешевле."),
+        ("Доставка / услуги", "Доставку, монтаж и другие услуги лучше выносить отдельными строками."),
+    ]
+    for row_idx, (field, note) in enumerate(guide_rows, start=3):
+        guide.cell(row_idx, 1, field).font = Font(bold=True, color="0F172A")
+        guide.cell(row_idx, 2, note).alignment = Alignment(wrap_text=True, vertical="top")
+    guide.column_dimensions["A"].width = 24
+    guide.column_dimensions["B"].width = 88
+
+    stream = io.BytesIO()
+    wb.save(stream)
+    return stream.getvalue()
+
+
 def supplier_items_to_request_items(items: list[SupplierItem]) -> list[RequestItem]:
     request_items: list[RequestItem] = []
     for idx, item in enumerate(items, start=1):
@@ -2334,6 +2439,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 build_request_template(),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "request_template.xlsx",
+            )
+            return
+        if path == "/template/offer.xlsx":
+            self.send_file_bytes(
+                build_offer_template(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "offer_template.xlsx",
             )
             return
         if path.startswith("/review/"):

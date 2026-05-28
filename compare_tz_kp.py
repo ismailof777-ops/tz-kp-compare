@@ -1340,6 +1340,101 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
     return items
 
 
+def read_supplier_xls(path: Path, supplier: str | None = None) -> list[SupplierItem]:
+    try:
+        import xlrd  # type: ignore
+    except ImportError as exc:
+        raise ValueError(
+            f"{path.name}: для чтения старого .xls не установлена библиотека xlrd. "
+            "Сохраните файл как .xlsx или PDF и запустите повторно."
+        ) from exc
+
+    book = xlrd.open_workbook(str(path))
+    supplier = supplier or supplier_name_from_file(path)
+    items: list[SupplierItem] = []
+
+    def cell_text(sheet, row: int, col: int | None) -> str:
+        if col is None or col < 0:
+            return ""
+        value = sheet.cell_value(row, col)
+        if sheet.cell_type(row, col) == xlrd.XL_CELL_DATE:
+            try:
+                parts = xlrd.xldate_as_tuple(value, book.datemode)
+                return f"{parts[2]:02d}/{parts[1]:02d}/{str(parts[0])[-2:]}"
+            except Exception:
+                return clean_text(value)
+        return clean_text(value)
+
+    def first_col(headers: dict[int, str], includes: Iterable[str], excludes: Iterable[str] = ()) -> int | None:
+        includes = [value.lower() for value in includes]
+        excludes = [value.lower() for value in excludes]
+        for col, value in headers.items():
+            if not value or any(marker in value for marker in excludes):
+                continue
+            if any(marker in value for marker in includes):
+                return col
+        return None
+
+    for sheet in book.sheets():
+        header_row: int | None = None
+        for row in range(min(sheet.nrows, 80)):
+            values = [clean_text(sheet.cell_value(row, col)).lower() for col in range(sheet.ncols)]
+            joined = " ".join(values)
+            has_name = any(marker in joined for marker in ["имя товара", "наименование", "товар", "номенклатура"])
+            has_qty = any(marker in joined for marker in ["кол-во", "количество", "кол во"])
+            has_price = any(marker in joined for marker in ["цена", "сумма", "стоимость"])
+            if has_name and has_qty and has_price:
+                header_row = row
+                break
+        if header_row is None:
+            continue
+
+        headers = {col: clean_text(sheet.cell_value(header_row, col)).lower() for col in range(sheet.ncols)}
+        name_col = first_col(headers, ["имя товара", "наименование", "номенклатура", "товар"], ["код", "артикул"])
+        qty_col = first_col(headers, ["кол-во", "количество", "кол во"])
+        unit_col = first_col(headers, ["ед.изм", "ед. изм", "единиц", "ед."])
+        price_col = first_col(headers, ["цена"], ["ндс %"])
+        total_col = first_col(headers, ["сумма", "стоимость"], ["ндс %"])
+        delivery_col = first_col(headers, ["срок поставки", "срок"])
+        pos_col = first_col(headers, ["№", "n", "номер"])
+
+        if name_col is None:
+            continue
+
+        for row in range(header_row + 1, sheet.nrows):
+            name = cell_text(sheet, row, name_col)
+            if not name:
+                continue
+            lower = name.lower()
+            if "итого" in lower or "всего" in lower:
+                continue
+            qty = parse_number(sheet.cell_value(row, qty_col)) if qty_col is not None else None
+            price = parse_number(sheet.cell_value(row, price_col)) if price_col is not None else None
+            total = parse_number(sheet.cell_value(row, total_col)) if total_col is not None else None
+            if price is None and total is None:
+                continue
+            if price is None and total is not None and qty:
+                price = round(total / qty, 4)
+            if total is None and price is not None and qty:
+                total = round(price * qty, 4)
+            items.append(
+                SupplierItem(
+                    supplier=supplier,
+                    source=path.name,
+                    row_no=cell_text(sheet, row, pos_col) if pos_col is not None else str(row - header_row),
+                    name=name,
+                    qty=qty,
+                    unit=cell_text(sheet, row, unit_col),
+                    price=price,
+                    total=total,
+                    delivery=cell_text(sheet, row, delivery_col),
+                    invoice_no=path.stem,
+                )
+            )
+
+    return items
+
+
 ROW_RE = re.compile(
     r"^\s*(?P<row>\d+)\s+(?:(?P<code>\d{4,}|[0-9]{4,}\s+заказ)\s+)?"
     r"(?P<name>.*?)\s+(?P<qty>\d[\d\s]*(?:[,.]\d+)?)\s+"
@@ -1466,6 +1561,27 @@ def parse_split_pdf_table(lines: list[str], path: Path, supplier: str, invoice_n
         if parts[0].isdigit() and len(parts) >= 6:
             row_no = parts[0]
             name = clean_pdf_name_line(parts[1])
+            if name and is_service_text(name):
+                amounts = [first_amount_from_text(part) for part in parts[2:]]
+                amounts = [amount for amount in amounts if amount is not None]
+                if amounts:
+                    flush_current()
+                    total = amounts[-1]
+                    items.append(
+                        SupplierItem(
+                            supplier=supplier,
+                            source=path.name,
+                            row_no=row_no,
+                            name=name,
+                            qty=1,
+                            unit="усл",
+                            price=total,
+                            total=total,
+                            delivery=delivery,
+                            invoice_no=invoice_no,
+                        )
+                    )
+                continue
             if not name or "доставка" in name.lower():
                 flush_current()
                 continue
@@ -2080,10 +2196,7 @@ def read_offer(path: Path, supplier: str | None = None) -> list[SupplierItem]:
     if suffix == ".pdf":
         return parse_layout_pdf(path, supplier)
     if suffix == ".xls":
-        raise ValueError(
-            f"{path.name}: старый .xls не поддержан текущим Python-окружением. "
-            "Сохраните файл как .xlsx или PDF и запустите повторно."
-        )
+        return read_supplier_xls(path, supplier)
     raise ValueError(f"{path.name}: неподдержанный формат КП")
 
 
@@ -2557,11 +2670,14 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     suppliers = sorted({m.supplier_item.supplier for m in matches})
     by_request_supplier: dict[tuple[str, str], list[Match]] = {}
     unmatched: list[SupplierItem] = []
+    review_items: list[Match] = []
     service_items: list[SupplierItem] = []
     service_by_supplier: dict[str, list[SupplierItem]] = {}
     for match in matches:
         if match.request_pos:
             by_request_supplier.setdefault((match.request_pos, match.supplier_item.supplier), []).append(match)
+            if match.status == "review":
+                review_items.append(match)
         elif match.status == "service":
             service_items.append(match.supplier_item)
             service_by_supplier.setdefault(match.supplier_item.supplier, []).append(match.supplier_item)
@@ -2845,6 +2961,42 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         extra.freeze_panes = "A2"
         for col_letter in ("G", "H"):
             for cell in extra[col_letter][1:]:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0.00 ₽'
+
+    if review_items:
+        review_sheet = wb.create_sheet("К проверке")
+        headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Предложенная позиция заявки", "Сходство", "Причина", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
+        review_sheet.append(headers)
+        request_by_pos = {item.pos: item for item in request_items}
+        for match in review_items:
+            offer = match.supplier_item
+            request = request_by_pos.get(match.request_pos or "")
+            request_label = f"{request.pos} - {request.name}" if request else ""
+            review_sheet.append([
+                offer.supplier,
+                invoice_label(offer),
+                offer.row_no,
+                offer.name,
+                request_label,
+                match.score,
+                match.reason,
+                offer.qty,
+                offer.unit,
+                offer.price,
+                offer.total,
+                offer.source,
+            ])
+        style_sheet(review_sheet)
+        widths = {"A": 20, "B": 20, "C": 10, "D": 70, "E": 70, "F": 12, "G": 40, "H": 12, "I": 10, "J": 14, "K": 14, "L": 24}
+        for col_letter, width in widths.items():
+            review_sheet.column_dimensions[col_letter].width = width
+        review_sheet.freeze_panes = "A2"
+        for cell in review_sheet["F"][1:]:
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = '0.00%'
+        for col_letter in ("J", "K"):
+            for cell in review_sheet[col_letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
 

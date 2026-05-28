@@ -2,3 +2,4 @@ openpyxl
 pypdf
 PyMuPDF
 pytesseract
+xlrd

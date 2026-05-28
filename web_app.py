@@ -1885,12 +1885,12 @@ def render_home(error: str = "") -> bytes:
         <p>Загрузите Excel-файл со списком позиций, количеством и единицами измерения.</p>
       </div>
       <div class="file-drop" data-drop-zone>
-        <input class="file-input" id="request" name="request" type="file" accept=".xlsx,.pdf" required>
+        <input class="file-input" id="request" name="request" type="file" accept=".xlsx,.xls,.pdf" required>
         <span class="file-icon">↑</span>
         <span class="file-title">Перетащите файл заявки сюда</span>
-        <span class="file-subtitle">или выберите .xlsx/PDF на компьютере</span>
+        <span class="file-subtitle">или выберите .xlsx/.xls/PDF на компьютере</span>
         <span class="file-pick">Выбрать файл</span>
-        <span class="file-support">Поддерживается .xlsx. Для сравнения двух КП можно загрузить сюда первый КП .xlsx/PDF.</span>
+        <span class="file-support">Поддерживается .xlsx. Для сравнения двух КП можно загрузить сюда первый КП .xlsx/.xls/PDF.</span>
       </div>
       <a class="template-link" href="/template/request.xlsx">Скачать шаблон заявки</a>
       <div class="file-list" data-file-list="request">Файл пока не выбран.</div>
@@ -1906,7 +1906,7 @@ def render_home(error: str = "") -> bytes:
         <span class="file-title">Перетащите КП или счета сюда</span>
         <span class="file-subtitle">или выберите один или несколько файлов</span>
         <span class="file-pick">Выбрать файлы</span>
-        <span class="file-support">Поддерживаются .xlsx и текстовые PDF</span>
+        <span class="file-support">Поддерживаются .xlsx, .xls и текстовые PDF</span>
       </div>
       <div class="file-list files-list" data-file-list="offers">Файлы пока не выбраны.</div>
     </div>
@@ -2395,7 +2395,7 @@ class AppHandler(BaseHTTPRequestHandler):
         offer_fields = uploads.get("offers", [])
         request_field = request_fields[0] if request_fields else None
         if request_field is None or not request_field.filename:
-            self.send_process_error("Загрузите файл заявки .xlsx.")
+            self.send_process_error("Загрузите файл заявки .xlsx или базовый файл КП .xlsx/.xls/PDF.")
             return
         offer_fields = [field for field in offer_fields if field.filename]
         if len(offer_fields) < 1:

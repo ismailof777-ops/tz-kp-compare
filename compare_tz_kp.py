@@ -2764,6 +2764,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     row = 3
     supplier_goods_totals = {supplier: 0.0 for supplier in suppliers}
     supplier_service_totals = {supplier: sum(offer_total_value(offer) or 0 for offer in service_by_supplier.get(supplier, [])) for supplier in suppliers}
+    selected_match_ids: set[int] = set()
     for request in request_items:
         desc_row = row
         label_row = row + 1
@@ -2793,6 +2794,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     key=lambda item: (item.status != "manual", -(item.supplier_item.price or 0), -item.score),
                 )[0]
                 selected[supplier] = chosen
+                selected_match_ids.add(id(chosen))
                 normalized_price, _ = normalized_unit_price(request, chosen.supplier_item)
                 if normalized_price is not None:
                     prices.append((supplier, normalized_price))
@@ -2953,6 +2955,56 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
     ws.freeze_panes = "D3"
+
+    all_sheet = wb.create_sheet("Все позиции КП")
+    headers = [
+        "Поставщик",
+        "Счет/КП",
+        "Строка",
+        "Позиция КП",
+        "Статус",
+        "Позиция заявки",
+        "Наименование заявки",
+        "В основной сводке",
+        "Кол-во",
+        "Ед.",
+        "Цена",
+        "Сумма",
+        "Источник",
+        "Причина",
+    ]
+    all_sheet.append(headers)
+    request_by_pos = {item.pos: item for item in request_items}
+    for match in matches:
+        offer = match.supplier_item
+        request = request_by_pos.get(match.request_pos or "")
+        all_sheet.append(
+            [
+                offer.supplier,
+                invoice_label(offer),
+                offer.row_no,
+                offer.name,
+                status_label(match.status),
+                request.pos if request else "",
+                request.name if request else "",
+                "да" if id(match) in selected_match_ids else "нет",
+                offer.qty,
+                offer.unit,
+                offer.price,
+                offer.total,
+                offer.source,
+                match.reason,
+            ]
+        )
+    style_sheet(all_sheet)
+    widths = {"A": 20, "B": 20, "C": 10, "D": 70, "E": 18, "F": 14, "G": 70, "H": 16, "I": 12, "J": 10, "K": 14, "L": 14, "M": 24, "N": 42}
+    for col_letter, width in widths.items():
+        all_sheet.column_dimensions[col_letter].width = width
+    all_sheet.freeze_panes = "A2"
+    for col_letter in ("K", "L"):
+        for cell in all_sheet[col_letter][1:]:
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = '#,##0.00 ₽'
 
     if unmatched:
         extra = wb.create_sheet("Не сопоставлено")

@@ -1736,6 +1736,17 @@ def clean_ocr_offer_name(text: str) -> str:
     return clean
 
 
+def source_row_no_from_table_prefix(text: str) -> str | None:
+    clean = clean_text(text)
+    match = re.match(r"^\s*(?P<row>\d{1,4})(?:\s+|$)", clean)
+    if not match:
+        return None
+    row_no = int(match.group("row"))
+    if row_no <= 0 or row_no > 9999:
+        return None
+    return str(row_no)
+
+
 def parse_fuzzy_ocr_pdf(lines: list[str], path: Path, supplier: str, invoice_no: str) -> list[SupplierItem]:
     structured_items = parse_structured_ocr_pdf(lines, path, supplier, invoice_no)
     if structured_items:
@@ -1818,6 +1829,7 @@ def parse_generic_ocr_table_pdf(lines: list[str], path: Path, supplier: str, inv
         if not marker_match:
             continue
 
+        source_row_no = source_row_no_from_table_prefix(compact[: marker_match.start()])
         name = clean_text(compact[marker_match.start() : qty_match.start()])
         name = re.sub(r"^\d{1,3}\s*\d{3,6}\s+", "", name)
         name = re.sub(r"^\d{3,6}\s+", "", name)
@@ -1845,7 +1857,7 @@ def parse_generic_ocr_table_pdf(lines: list[str], path: Path, supplier: str, inv
             SupplierItem(
                 supplier=supplier,
                 source=path.name,
-                row_no=str(len(items) + 1),
+                row_no=source_row_no or str(len(items) + 1),
                 name=name,
                 qty=qty,
                 unit="шт",

@@ -1177,6 +1177,14 @@ def first_header_col(headers: dict[int, str], includes: Iterable[str], excludes:
     return None
 
 
+def find_price_column(headers: dict[int, str]) -> int | None:
+    return first_header_col(headers, ["цена"], ["ндс %", "% ндс", "ставка ндс"])
+
+
+def find_total_column(headers: dict[int, str]) -> int | None:
+    return first_header_col(headers, ["стоимость", "сумма"], ["ндс %", "% ндс", "ставка ндс"])
+
+
 def looks_like_vat_column(ws, col: int, header_row: int) -> bool:
     values = []
     for row in range(header_row + 1, min(ws.max_row, header_row + 25) + 1):
@@ -1210,8 +1218,9 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
     name_col = first_header_col(headers, ["номенклатура", "наименование", "товар"], ["код", "артикул"])
     qty_col = first_header_col(headers, ["количество", "кол-во", "кол во"])
     unit_col = first_header_col(headers, ["ед.", "единиц", "ед "])
-    price_col = first_header_col(headers, ["цена"], ["ндс"])
-    total_col = first_header_col(headers, ["стоимость", "сумма"], ["ндс"])
+    price_col = find_price_column(headers)
+    total_col = find_total_column(headers)
+    delivery_col = first_header_col(headers, ["срок поставки", "срок"])
     pos_col = first_header_col(headers, ["№", "номер"]) or 1
 
     if not name_col:
@@ -1226,7 +1235,7 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
     if not qty_col and price_col and price_col > name_col + 1:
         qty_col = price_col - 1
     if not price_col:
-        price_col = first_header_col(headers, ["стоимость", "сумма"], ["ндс"])
+        price_col = find_total_column(headers)
     if not qty_col or not price_col:
         return []
 
@@ -1254,6 +1263,7 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
                 unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                 price=price,
                 total=total,
+                delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else "",
                 invoice_no=invoice_no,
             )
         )
@@ -1281,6 +1291,7 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
             unit_col = find_column_preferred(ws, header_row, exact=["ед.", "ед"], contains=["ед."])
             price_col = find_column_preferred(ws, header_row, exact=["цена"], contains=["цена"])
             total_col = find_column(ws, header_row, ["сумма", "стоимость"])
+            delivery_col = find_column(ws, header_row, ["срок"])
             pos_col = find_column(ws, header_row, ["№"]) or 1
             if name_col and qty_col and price_col:
                 for row in range(header_row + 1, ws.max_row + 1):
@@ -1304,6 +1315,7 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
+                            delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else "",
                             invoice_no=invoice_no,
                         )
                     )

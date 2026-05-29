@@ -1263,7 +1263,7 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
                 unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                 price=price,
                 total=total,
-                delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else "",
+                delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else delivery_from_offer_text(name),
                 invoice_no=invoice_no,
             )
         )
@@ -1315,7 +1315,7 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
-                            delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else "",
+                            delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else delivery_from_offer_text(name),
                             invoice_no=invoice_no,
                         )
                     )
@@ -1351,7 +1351,7 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
-                            delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else "",
+                            delivery=clean_text(ws.cell(row, delivery_col).value) if delivery_col else delivery_from_offer_text(name),
                             invoice_no=invoice_no,
                         )
                     )
@@ -1447,7 +1447,7 @@ def read_supplier_xls(path: Path, supplier: str | None = None) -> list[SupplierI
                     unit=cell_text(sheet, row, unit_col),
                     price=price,
                     total=total,
-                    delivery=cell_text(sheet, row, delivery_col),
+                    delivery=cell_text(sheet, row, delivery_col) if delivery_col is not None else delivery_from_offer_text(name),
                     invoice_no=path.stem,
                 )
             )
@@ -1500,6 +1500,24 @@ def delivery_from_pdf_lines(lines: list[str]) -> str:
         if "срок исполнения" in lower or "срок поставки" in lower or "ориентировочный срок поставки" in lower:
             parts = re.split(r":", clean, maxsplit=1)
             return clean_text(parts[-1]) if len(parts) > 1 else clean
+    return ""
+
+
+def delivery_from_offer_text(text: str) -> str:
+    clean = clean_text(text)
+    lower = clean.lower()
+    if "в наличии" in lower:
+        return "в наличии"
+    match = re.search(
+        r"под\s+заказ(?:\s+до)?\s+[\w\s.,;:-]{0,30}?(?:\d+\s*[-–—]\s*\d+\s*(?:дней|дня|дн|недель|нед|месяц\w*)|\d+\s*(?:дней|дня|дн|недель|нед|месяц\w*))",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return clean_text(match.group(0))
+    match = re.search(r"\b\d+\s*[-–—]\s*\d+\s*(?:дней|дня|дн|недель|нед|месяц\w*)\b", clean, flags=re.IGNORECASE)
+    if match:
+        return clean_text(match.group(0))
     return ""
 
 

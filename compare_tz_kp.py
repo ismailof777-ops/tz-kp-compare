@@ -1238,6 +1238,8 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
         price = parse_number(ws.cell(row, price_col).value)
         total = parse_number(ws.cell(row, total_col).value) if total_col else None
         qty = parse_quantity(ws.cell(row, qty_col).value, price, total)
+        if total is None and price is not None and qty is not None:
+            total = round(price * qty, 4)
         if price is None and total is None:
             continue
         if qty is None and price is None:
@@ -1287,6 +1289,9 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                         continue
                     price = parse_number(ws.cell(row, price_col).value)
                     total = parse_number(ws.cell(row, total_col).value) if total_col else None
+                    qty = parse_quantity(ws.cell(row, qty_col).value, price, total)
+                    if total is None and price is not None and qty is not None:
+                        total = round(price * qty, 4)
                     if price is None and total is None:
                         continue
                     items.append(
@@ -1295,7 +1300,7 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             source=path.name,
                             row_no=clean_text(ws.cell(row, pos_col).value) or str(row),
                             name=name,
-                            qty=parse_quantity(ws.cell(row, qty_col).value, price, total),
+                            qty=qty,
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
@@ -1319,6 +1324,9 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                     name = clean_text(ws.cell(row, name_col).value)
                     price = parse_number(ws.cell(row, price_col).value)
                     total = parse_number(ws.cell(row, total_col).value) if total_col else None
+                    qty = parse_quantity(ws.cell(row, qty_col).value, price, total) if qty_col else None
+                    if total is None and price is not None and qty is not None:
+                        total = round(price * qty, 4)
                     if not name or (price is None and total is None):
                         continue
                     items.append(
@@ -1327,7 +1335,7 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                             source=path.name,
                             row_no=clean_text(ws.cell(row, pos_col).value) or str(row),
                             name=name,
-                            qty=parse_quantity(ws.cell(row, qty_col).value, price, total) if qty_col else None,
+                            qty=qty,
                             unit=clean_text(ws.cell(row, unit_col).value) if unit_col else "",
                             price=price,
                             total=total,
@@ -2826,7 +2834,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.cell(value_row, start + 1, price_display)
             qty_result = quantity_check(request, offer)
             ws.cell(value_row, start + 2, qty_result.display)
-            ws.cell(value_row, start + 3, offer.total)
+            ws.cell(value_row, start + 3, offer_total_value(offer))
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
             qty_ok = qty_result.status == "ok"
             if normalized_price is not None and min_price is not None and abs(normalized_price - min_price) < 0.0001:
@@ -2991,7 +2999,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 offer.qty,
                 offer.unit,
                 offer.price,
-                offer.total,
+                offer_total_value(offer),
                 offer.source,
                 match.reason,
             ]
@@ -3011,7 +3019,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
         extra.append(headers)
         for offer in unmatched:
-            extra.append([offer.supplier, invoice_label(offer), offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
+            extra.append([offer.supplier, invoice_label(offer), offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer_total_value(offer), offer.source])
         style_sheet(extra)
         extra.column_dimensions["A"].width = 20
         extra.column_dimensions["B"].width = 20
@@ -3048,7 +3056,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 offer.qty,
                 offer.unit,
                 offer.price,
-                offer.total,
+                offer_total_value(offer),
                 offer.source,
             ])
         style_sheet(review_sheet)
@@ -3069,7 +3077,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
         service.append(headers)
         for offer in service_items:
-            service.append([offer.supplier, invoice_label(offer), offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer.total, offer.source])
+            service.append([offer.supplier, invoice_label(offer), offer.row_no, offer.name, offer.qty, offer.unit, offer.price, offer_total_value(offer), offer.source])
         style_sheet(service)
         service.column_dimensions["A"].width = 20
         service.column_dimensions["B"].width = 20

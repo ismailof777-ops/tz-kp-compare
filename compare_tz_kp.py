@@ -1177,12 +1177,69 @@ def first_header_col(headers: dict[int, str], includes: Iterable[str], excludes:
     return None
 
 
+def ranked_header_col(
+    headers: dict[int, str],
+    includes: Iterable[str],
+    excludes: Iterable[str] = (),
+    preferred: Iterable[str] = (),
+) -> int | None:
+    includes = [value.lower() for value in includes]
+    excludes = [value.lower() for value in excludes]
+    preferred = [value.lower() for value in preferred]
+    candidates: list[tuple[int, int]] = []
+    for col, value in headers.items():
+        if not value or any(marker in value for marker in excludes):
+            continue
+        if not any(marker in value for marker in includes):
+            continue
+        score = sum(3 for marker in preferred if marker in value)
+        if "без ндс" in value:
+            score -= 4
+        if "с ндс" in value or "в т.ч. ндс" in value or "включая ндс" in value:
+            score += 5
+        if "итог" in value or "всего" in value:
+            score -= 2
+        candidates.append((score, col))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][1]
+
+
 def find_price_column(headers: dict[int, str]) -> int | None:
-    return first_header_col(headers, ["цена"], ["ндс %", "% ндс", "ставка ндс"])
+    return ranked_header_col(
+        headers,
+        ["цена"],
+        ["ндс %", "% ндс", "ставка ндс"],
+        ["цена с ндс", "цена, с ндс", "цена с учетом ндс", "цена, руб"],
+    )
 
 
 def find_total_column(headers: dict[int, str]) -> int | None:
-    return first_header_col(headers, ["стоимость", "сумма"], ["ндс %", "% ндс", "ставка ндс"])
+    return ranked_header_col(
+        headers,
+        ["стоимость", "сумма"],
+        ["ндс %", "% ндс", "ставка ндс"],
+        ["сумма с ндс", "стоимость с ндс", "сумма, с ндс", "итого с ндс"],
+    )
+
+
+def find_article_column(headers: dict[int, str]) -> int | None:
+    return first_header_col(headers, ["артикул", "код товара", "код поставщика", "sku"])
+
+
+def find_delivery_column(headers: dict[int, str]) -> int | None:
+    return first_header_col(headers, ["срок поставки", "срок", "наличие", "остаток", "статус"])
+
+
+def name_with_article(name: str, article: str) -> str:
+    name = clean_text(name)
+    article = clean_text(article)
+    if not article:
+        return name
+    if article.lower() in name.lower():
+        return name
+    return f"{article} {name}".strip()
 
 
 def looks_like_vat_column(ws, col: int, header_row: int) -> bool:
@@ -1216,11 +1273,12 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
 
     headers = header_values(ws, header_row)
     name_col = first_header_col(headers, ["номенклатура", "наименование", "товар"], ["код", "артикул"])
+    article_col = find_article_column(headers)
     qty_col = first_header_col(headers, ["количество", "кол-во", "кол во"])
     unit_col = first_header_col(headers, ["ед.", "единиц", "ед "])
     price_col = find_price_column(headers)
     total_col = find_total_column(headers)
-    delivery_col = first_header_col(headers, ["срок поставки", "срок"])
+    delivery_col = find_delivery_column(headers)
     pos_col = first_header_col(headers, ["№", "номер"]) or 1
 
     if not name_col:
@@ -1241,7 +1299,10 @@ def read_loose_supplier_xlsx(ws, path: Path, supplier: str, invoice_no: str) -> 
 
     items: list[SupplierItem] = []
     for row in range(header_row + 1, ws.max_row + 1):
-        name = clean_text(ws.cell(row, name_col).value)
+        name = name_with_article(
+            clean_text(ws.cell(row, name_col).value),
+            clean_text(ws.cell(row, article_col).value) if article_col else "",
+        )
         if not name or "итого" in name.lower() or "всего" in name.lower():
             continue
         price = parse_number(ws.cell(row, price_col).value)
@@ -1287,15 +1348,20 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
                 contains=["номенклатура", "наименование", "товар"],
                 exclude=["код товара", "код"],
             )
+            headers = header_values(ws, header_row)
+            article_col = find_article_column(headers)
             qty_col = find_column_preferred(ws, header_row, exact=["кол-во", "количество"], contains=["кол-во", "количество"])
             unit_col = find_column_preferred(ws, header_row, exact=["ед.", "ед"], contains=["ед."])
-            price_col = find_column_preferred(ws, header_row, exact=["цена"], contains=["цена"])
-            total_col = find_column(ws, header_row, ["сумма", "стоимость"])
-            delivery_col = find_column(ws, header_row, ["срок"])
+            price_col = find_price_column(headers) or find_column_preferred(ws, header_row, exact=["цена"], contains=["цена"])
+            total_col = find_total_column(headers) or find_column(ws, header_row, ["сумма", "стоимость"])
+            delivery_col = find_delivery_column(headers)
             pos_col = find_column(ws, header_row, ["№"]) or 1
             if name_col and qty_col and price_col:
                 for row in range(header_row + 1, ws.max_row + 1):
-                    name = clean_text(ws.cell(row, name_col).value)
+                    name = name_with_article(
+                        clean_text(ws.cell(row, name_col).value),
+                        clean_text(ws.cell(row, article_col).value) if article_col else "",
+                    )
                     if not name or "итого" in name.lower() or "всего" in name.lower():
                         continue
                     price = parse_number(ws.cell(row, price_col).value)
@@ -1324,16 +1390,21 @@ def read_supplier_xlsx(path: Path, supplier: str | None = None) -> list[Supplier
         request_like_header = find_header_row(ws, ["описание", "предельная цена"])
         if request_like_header:
             header_row, _ = request_like_header
+            headers = header_values(ws, header_row)
             pos_col = find_column(ws, header_row, ["№"]) or 1
             name_col = find_column(ws, header_row, ["описание закупаемой", "описание"])
+            article_col = find_article_column(headers)
             qty_col = find_column(ws, header_row, ["необходимый объем", "количество"])
             unit_col = find_column(ws, header_row, ["ед. измерения", "ед измерения"])
-            price_col = find_column(ws, header_row, ["предельная цена", "цена"])
-            total_col = find_column(ws, header_row, ["стоимость", "сумма"])
-            delivery_col = find_column(ws, header_row, ["срок"])
+            price_col = find_price_column(headers) or find_column(ws, header_row, ["предельная цена", "цена"])
+            total_col = find_total_column(headers) or find_column(ws, header_row, ["стоимость", "сумма"])
+            delivery_col = find_delivery_column(headers)
             if name_col and price_col:
                 for row in range(header_row + 1, ws.max_row + 1):
-                    name = clean_text(ws.cell(row, name_col).value)
+                    name = name_with_article(
+                        clean_text(ws.cell(row, name_col).value),
+                        clean_text(ws.cell(row, article_col).value) if article_col else "",
+                    )
                     price = parse_number(ws.cell(row, price_col).value)
                     total = parse_number(ws.cell(row, total_col).value) if total_col else None
                     qty = parse_quantity(ws.cell(row, qty_col).value, price, total) if qty_col else None
@@ -1411,18 +1482,22 @@ def read_supplier_xls(path: Path, supplier: str | None = None) -> list[SupplierI
 
         headers = {col: clean_text(sheet.cell_value(header_row, col)).lower() for col in range(sheet.ncols)}
         name_col = first_col(headers, ["имя товара", "наименование", "номенклатура", "товар"], ["код", "артикул"])
+        article_col = find_article_column(headers)
         qty_col = first_col(headers, ["кол-во", "количество", "кол во"])
         unit_col = first_col(headers, ["ед.изм", "ед. изм", "единиц", "ед."])
-        price_col = first_col(headers, ["цена"], ["ндс %"])
-        total_col = first_col(headers, ["сумма", "стоимость"], ["ндс %"])
-        delivery_col = first_col(headers, ["срок поставки", "срок"])
+        price_col = find_price_column(headers) or first_col(headers, ["цена"], ["ндс %"])
+        total_col = find_total_column(headers) or first_col(headers, ["сумма", "стоимость"], ["ндс %"])
+        delivery_col = find_delivery_column(headers)
         pos_col = first_col(headers, ["№", "n", "номер"])
 
         if name_col is None:
             continue
 
         for row in range(header_row + 1, sheet.nrows):
-            name = cell_text(sheet, row, name_col)
+            name = name_with_article(
+                cell_text(sheet, row, name_col),
+                cell_text(sheet, row, article_col) if article_col is not None else "",
+            )
             if not name:
                 continue
             lower = name.lower()

@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import to_excel
@@ -197,6 +199,7 @@ class Match:
     score: float
     status: str
     reason: str
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -2634,6 +2637,8 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
         "Статус",
         "Позиция заявки (исправить при необходимости)",
         "Позиция заявки - текст",
+        "Ед. заявки",
+        "Кол-во заявки",
         "Поставщик",
         "Строка КП",
         "Позиция КП",
@@ -2645,6 +2650,7 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
         "Ед. сравнения",
         "Уверенность",
         "Причина",
+        "Примечание",
         "Источник",
     ]
     ws.append(headers)
@@ -2656,6 +2662,8 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
                 status_label(match.status),
                 match.request_pos or "",
                 request.name if request else "",
+                request.unit if request else "",
+                request.qty if request else "",
                 match.supplier_item.supplier,
                 match.supplier_item.row_no,
                 match.supplier_item.name,
@@ -2667,13 +2675,14 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
                 match.supplier_item.override_unit,
                 round(match.score, 3),
                 match.reason,
+                match.note,
                 match.supplier_item.source,
             ]
         )
     style_sheet(ws)
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    widths = [14, 22, 48, 22, 12, 62, 12, 8, 12, 14, 18, 12, 12, 34, 32]
+    widths = [14, 22, 48, 10, 12, 22, 12, 62, 12, 8, 12, 14, 18, 12, 12, 34, 40, 32]
     for idx, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
     wb.save(path)
@@ -2683,13 +2692,27 @@ def read_review_overrides(path: Path) -> dict[tuple[str, str, str], str | None]:
     wb = load_workbook(path, data_only=True)
     ws = wb["Проверка"] if "Проверка" in wb.sheetnames else wb.active
     overrides: dict[tuple[str, str, str], str | None] = {}
+    headers = [clean_text(cell.value).lower() for cell in ws[1]]
+
+    def col_index(*names: str, fallback: int) -> int:
+        for name in names:
+            lowered = name.lower()
+            for idx, header in enumerate(headers):
+                if header == lowered:
+                    return idx
+        return fallback
+
+    request_idx = col_index("Позиция заявки (исправить при необходимости)", fallback=1)
+    supplier_idx = col_index("Поставщик", fallback=3)
+    row_idx = col_index("Строка КП", fallback=4)
+    source_idx = col_index("Источник", fallback=14)
     for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or not row[3]:
+        if not row or len(row) <= supplier_idx or not row[supplier_idx]:
             continue
-        request_pos = clean_text(row[1])
-        supplier = clean_text(row[3])
-        row_no = clean_text(row[4])
-        source = clean_text(row[14] if len(row) > 14 else row[12])
+        request_pos = clean_text(row[request_idx] if len(row) > request_idx else "")
+        supplier = clean_text(row[supplier_idx])
+        row_no = clean_text(row[row_idx] if len(row) > row_idx else "")
+        source = clean_text(row[source_idx] if len(row) > source_idx else "")
         key = (supplier, row_no, source)
         if request_pos.lower() in {"", "-", "нет", "skip", "не сравнивать"}:
             overrides[key] = None
@@ -2749,6 +2772,21 @@ def fmt_price_value(value: float | None) -> str:
     if value is None:
         return ""
     return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def request_name_with_notes(name: str, notes: Iterable[str]) -> str | CellRichText:
+    clean_notes = []
+    for note in notes:
+        text = clean_text(note)
+        if text and text not in clean_notes:
+            clean_notes.append(text)
+    if not clean_notes:
+        return name
+    rich = CellRichText()
+    rich.append(TextBlock(InlineFont(b=True), name))
+    for note in clean_notes:
+        rich.append(TextBlock(InlineFont(color="C00000", b=True), f"\nПримечание: {note}"))
+    return rich
 
 
 def normalized_unit_price(request: RequestItem, offer: SupplierItem) -> tuple[float | None, str | float | None]:
@@ -2915,6 +2953,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
 
         min_price = min((price for _, price in prices), default=None)
         max_price = max((price for _, price in prices), default=None)
+        ws.cell(desc_row, 2, request_name_with_notes(request.name, (match.note for match in selected.values())))
 
         for supplier in suppliers:
             start = supplier_start_cols[supplier]
@@ -3085,6 +3124,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         "Сумма",
         "Источник",
         "Причина",
+        "Примечание",
     ]
     all_sheet.append(headers)
     request_by_pos = {item.pos: item for item in request_items}
@@ -3107,10 +3147,11 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 offer_total_value(offer),
                 offer.source,
                 match.reason,
+                match.note,
             ]
         )
     style_sheet(all_sheet)
-    widths = {"A": 20, "B": 20, "C": 10, "D": 70, "E": 18, "F": 14, "G": 70, "H": 16, "I": 12, "J": 10, "K": 14, "L": 14, "M": 24, "N": 42}
+    widths = {"A": 20, "B": 20, "C": 10, "D": 70, "E": 18, "F": 14, "G": 70, "H": 16, "I": 12, "J": 10, "K": 14, "L": 14, "M": 24, "N": 42, "O": 44}
     for col_letter, width in widths.items():
         all_sheet.column_dimensions[col_letter].width = width
     all_sheet.freeze_panes = "A2"
@@ -3143,7 +3184,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
 
     if review_items:
         review_sheet = wb.create_sheet("К проверке")
-        headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Предложенная позиция заявки", "Сходство", "Причина", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
+        headers = ["Поставщик", "Счет/КП", "Строка", "Позиция КП", "Предложенная позиция заявки", "Сходство", "Причина", "Примечание", "Кол-во", "Ед.", "Цена", "Сумма", "Источник"]
         review_sheet.append(headers)
         request_by_pos = {item.pos: item for item in request_items}
         for match in review_items:
@@ -3158,6 +3199,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 request_label,
                 match.score,
                 match.reason,
+                match.note,
                 offer.qty,
                 offer.unit,
                 offer.price,
@@ -3165,14 +3207,14 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 offer.source,
             ])
         style_sheet(review_sheet)
-        widths = {"A": 20, "B": 20, "C": 10, "D": 70, "E": 70, "F": 12, "G": 40, "H": 12, "I": 10, "J": 14, "K": 14, "L": 24}
+        widths = {"A": 20, "B": 20, "C": 10, "D": 70, "E": 70, "F": 12, "G": 40, "H": 44, "I": 12, "J": 10, "K": 14, "L": 14, "M": 24}
         for col_letter, width in widths.items():
             review_sheet.column_dimensions[col_letter].width = width
         review_sheet.freeze_panes = "A2"
         for cell in review_sheet["F"][1:]:
             if isinstance(cell.value, (int, float)):
                 cell.number_format = '0.00%'
-        for col_letter in ("J", "K"):
+        for col_letter in ("K", "L"):
             for cell in review_sheet[col_letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'

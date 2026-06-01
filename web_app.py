@@ -946,11 +946,11 @@ a:hover {
 table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 1520px;
+  min-width: 1680px;
   font-size: 13px;
 }
 .review-page table {
-  min-width: 1460px;
+  min-width: 1780px;
 }
 th, td {
   border-bottom: 1px solid var(--line);
@@ -1012,6 +1012,26 @@ td.small, th.small { width: 118px; }
 }
 .review-table .unit-input {
   width: 74px;
+}
+.review-table .request-unit {
+  color: var(--text);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.review-table .note-input {
+  width: 220px;
+  min-height: 74px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font: 13px/1.35 var(--font-sans);
+  color: var(--text);
+  background: #fff;
+}
+.review-table .note-input:focus {
+  outline: 2px solid rgba(15, 118, 110, 0.14);
+  border-color: #99f6e4;
 }
 .review-table .norm-hint {
   display: block;
@@ -1632,6 +1652,12 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
     const updateMatchTitle = (input) => {{
       const option = requestOptions.find((item) => item.value === input.value);
       input.title = option?.dataset.full || input.value || 'Оставить без сопоставления';
+      const row = input.closest('[data-review-row]');
+      const unitCell = row?.querySelector('[data-request-unit]');
+      if (unitCell) {{
+        const parts = [option?.dataset.qty || '', option?.dataset.unit || ''].filter(Boolean);
+        unitCell.textContent = parts.join(' ') || '—';
+      }}
     }};
     document.querySelectorAll('.match-input').forEach((input) => {{
       updateMatchTitle(input);
@@ -1769,6 +1795,7 @@ def match_from_dict(data: dict) -> Match:
         score=float(data.get("score") or 0),
         status=clean_text(data.get("status")) or "review",
         reason=clean_text(data.get("reason") or ""),
+        note=clean_text(data.get("note") or ""),
     )
 
 
@@ -1951,7 +1978,8 @@ def render_review(run_id: str) -> bytes:
         if match.status != "service" and (match.status != "auto" or not match.request_pos or match.reason)
     ]
     request_options = "\n".join(
-        f'<option value="{esc(item.pos)} - {esc(item.name)}" data-full="{esc(item.pos)} - {esc(item.name)}"></option>'
+        f'<option value="{esc(item.pos)} - {esc(item.name)}" data-full="{esc(item.pos)} - {esc(item.name)}" '
+        f'data-unit="{esc(item.unit)}" data-qty="{esc(f"{item.qty:g}".replace(".", ",") if item.qty is not None else "")}"></option>'
         for item in request_items
     )
     unit_options = "".join(f'<option value="{unit}"></option>' for unit in ["м2", "м3", "шт", "п.м", "м", "кг", "т", "упак"])
@@ -1961,6 +1989,9 @@ def render_review(run_id: str) -> bytes:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
         selected_value = f"{selected_item.pos} - {selected_item.name}" if selected_item else ""
         selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
+        request_unit = selected_item.unit if selected_item else ""
+        request_qty = f"{selected_item.qty:g}".replace(".", ",") if selected_item and selected_item.qty is not None else ""
+        request_unit_text = " ".join(part for part in [request_qty, request_unit] if part) or "—"
         suggestion_buttons = ""
         suggestions = top_request_suggestions(match, request_items)
         if suggestions:
@@ -1987,6 +2018,7 @@ def render_review(run_id: str) -> bytes:
 <tr data-review-row>
   <td class="small"><span class="status {status_class}">{esc(status_label(match.status))}</span></td>
   <td>{match_input}</td>
+  <td class="small request-unit" data-request-unit>{esc(request_unit_text)}</td>
   <td>{esc(match.supplier_item.supplier)}</td>
   <td class="small">{esc(match.supplier_item.row_no)}</td>
   <td class="with-tooltip" title="{esc(match.supplier_item.name)}">{esc(match.supplier_item.name)}</td>
@@ -1999,6 +2031,9 @@ def render_review(run_id: str) -> bytes:
     <input class="compact-input unit-input" type="text" name="norm_unit_{idx}" list="unit-options" value="{esc(match.supplier_item.override_unit)}" placeholder="м3">
   </td>
   <td class="small">{esc(match.supplier_item.price)}</td>
+  <td>
+    <textarea class="note-input" name="note_{idx}" rows="3" placeholder="Примечание по расхождению">{esc(match.note)}</textarea>
+  </td>
   <td>{esc(match.reason or "проверить совпадение")}</td>
 </tr>"""
 
@@ -2026,6 +2061,7 @@ def render_review(run_id: str) -> bytes:
           <tr>
             <th class="small">Статус</th>
             <th>Позиция заявки</th>
+            <th class="small">Ед. заявки</th>
             <th>Поставщик</th>
             <th class="small">Строка</th>
             <th>Позиция КП</th>
@@ -2033,6 +2069,7 @@ def render_review(run_id: str) -> bytes:
             <th class="small">Объем</th>
             <th class="small">Ед.</th>
             <th class="small">Цена</th>
+            <th>Примечание</th>
             <th>Причина</th>
           </tr>
         </thead>
@@ -2616,6 +2653,7 @@ class AppHandler(BaseHTTPRequestHandler):
             field_name = f"match_{idx}"
             norm_qty = parse_number(form.get(f"norm_qty_{idx}", [""])[0])
             norm_unit = clean_text(form.get(f"norm_unit_{idx}", [""])[0])
+            note = clean_text(form.get(f"note_{idx}", [match.note])[0])
             supplier_item = match.supplier_item
             if norm_qty is not None and norm_qty > 0 and norm_unit:
                 supplier_item = replace(supplier_item, override_qty=norm_qty, override_unit=norm_unit)
@@ -2624,11 +2662,11 @@ class AppHandler(BaseHTTPRequestHandler):
             if field_name in form:
                 request_pos = resolve_request_pos(form[field_name][0], request_items)
                 if request_pos:
-                    updated.append(Match(supplier_item, request_pos, match.score, "manual", "подтверждено на проверке"))
+                    updated.append(Match(supplier_item, request_pos, match.score, "manual", "подтверждено на проверке", note))
                 else:
-                    updated.append(Match(supplier_item, None, match.score, "unmatched", "оставлено без сопоставления"))
+                    updated.append(Match(supplier_item, None, match.score, "unmatched", "оставлено без сопоставления", note))
             else:
-                updated.append(Match(supplier_item, match.request_pos, match.score, match.status, match.reason))
+                updated.append(Match(supplier_item, match.request_pos, match.score, match.status, match.reason, note))
 
         write_review(run_dir / "review.xlsx", updated, request_items)
         write_final(run_dir / "summary.xlsx", request_items, updated)

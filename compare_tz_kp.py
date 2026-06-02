@@ -480,6 +480,30 @@ def clean_request_unit(unit: str, name: str = "", specs: str = "") -> str:
     return infer_unit_from_text(f"{name} {specs}")
 
 
+def request_detail_display(request: RequestItem, unit: str) -> str:
+    details: list[str] = []
+    qty_text = fmt_qty(request.qty)
+    qty_line = f"{qty_text} {unit}".strip()
+    if qty_line:
+        details.append(qty_line)
+
+    specs = clean_text(request.specs)
+    if specs and specs.lower() not in clean_text(request.name).lower():
+        details.append(specs)
+
+    source = f"{request.name} {request.specs}"
+    size_matches = re.findall(
+        r"\b\d+(?:[,.]\d+)?\s*[xхXХ*]\s*\d+(?:[,.]\d+)?(?:\s*[xхXХ*]\s*\d+(?:[,.]\d+)?)?\b",
+        source,
+    )
+    for size in size_matches:
+        normalized_size = clean_text(size)
+        if normalized_size and all(normalized_size.lower() not in item.lower() for item in details):
+            details.append(normalized_size)
+
+    return "\n".join(details)
+
+
 @lru_cache(maxsize=40000)
 def area_m2_from_text(text: str) -> float | None:
     normalized = normalize(text)
@@ -1107,7 +1131,22 @@ def read_request_sheet(ws) -> list[RequestItem] | None:
     header_row, _ = found
     pos_col = find_column(ws, header_row, ["№", "номер"]) or 1
     name_col = find_column(ws, header_row, ["описание закупаемой", "описание", "позици", "наименование", "товар"])
-    specs_col = find_column(ws, header_row, ["технические характеристики", "гост"])
+    specs_col = find_column(
+        ws,
+        header_row,
+        [
+            "технические характеристики",
+            "тех характеристики",
+            "характеристики",
+            "характеристика",
+            "размер",
+            "размеры",
+            "габарит",
+            "требования",
+            "примечание",
+            "гост",
+        ],
+    )
     unit_col = find_column(ws, header_row, ["единица измерения", "единицы измерения", "ед. измерения", "ед измерения", "ед. из", "ед из", "ед."])
     qty_col = find_column(ws, header_row, ["необходимый объем", "количество", "количесвто", "количесв", "кол-во", "кол во", "кол-во."])
 
@@ -2951,29 +2990,11 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     supplier_service_totals = {supplier: sum(offer_total_value(offer) or 0 for offer in service_by_supplier.get(supplier, [])) for supplier in suppliers}
     selected_match_ids: set[int] = set()
     for request in request_items:
-        desc_row = row
-        label_row = row + 1
-        value_row = row + 2
-
-        ws.cell(label_row, 1, "позиция\nв заявке")
-        ws.cell(value_row, 1, request.pos)
-        ws.merge_cells(start_row=desc_row, start_column=2, end_row=value_row, end_column=2)
-        ws.cell(desc_row, 2, request.name)
-        ws.merge_cells(start_row=desc_row, start_column=3, end_row=value_row, end_column=3)
-        qty_text = fmt_qty(request.qty)
-        request_unit = clean_request_unit(request.unit, request.name, request.specs)
-        request_for_compare = RequestItem(request.pos, request.name, request.specs, request_unit, request.qty)
-        ws.cell(desc_row, 3, f"{qty_text} {request_unit}".strip())
-        style_range(desc_row, value_row, 1, 3, white)
-        ws.cell(label_row, 1).font = Font(size=7)
-        ws.cell(value_row, 1).font = Font(size=10)
-        ws.cell(desc_row, 2).font = Font(bold=True)
-        ws.cell(desc_row, 2).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        ws.cell(desc_row, 3).font = Font(bold=True)
-
         prices: list[tuple[str, float]] = []
         selected: dict[str, Match] = {}
         selected_groups: dict[str, list[Match]] = {}
+        request_unit = clean_request_unit(request.unit, request.name, request.specs)
+        request_for_compare = RequestItem(request.pos, request.name, request.specs, request_unit, request.qty)
         for supplier in suppliers:
             candidates = by_request_supplier.get((request.pos, supplier), [])
             if candidates:
@@ -2990,18 +3011,37 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     prices.append((supplier, normalized_price))
                 supplier_goods_totals[supplier] += sum(offer_total_value(candidate.supplier_item) or 0 for candidate in candidates)
 
+        block_lines = max(1, *(len(group) for group in selected_groups.values())) if selected_groups else 1
+        desc_row = row
+        label_row = row + 1
+        value_row = row + 2
+        last_value_row = value_row + block_lines - 1
+
+        ws.cell(label_row, 1, "позиция\nв заявке")
+        ws.cell(value_row, 1, request.pos)
+        ws.merge_cells(start_row=value_row, start_column=1, end_row=last_value_row, end_column=1)
+        ws.merge_cells(start_row=desc_row, start_column=2, end_row=last_value_row, end_column=2)
+        ws.cell(desc_row, 2, request.name)
+        ws.merge_cells(start_row=desc_row, start_column=3, end_row=last_value_row, end_column=3)
+        ws.cell(desc_row, 3, request_detail_display(request, request_unit))
+        style_range(desc_row, last_value_row, 1, 3, white)
+        ws.cell(label_row, 1).font = Font(size=7)
+        ws.cell(value_row, 1).font = Font(size=10)
+        ws.cell(desc_row, 2).font = Font(bold=True)
+        ws.cell(desc_row, 2).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.cell(desc_row, 3).font = Font(bold=True)
+
         min_price = min((price for _, price in prices), default=None)
         max_price = max((price for _, price in prices), default=None)
         ws.cell(desc_row, 2, request_name_with_notes(request.name, (match.note for match in selected.values())))
-        max_group_lines = 1
 
         for supplier in suppliers:
             start = supplier_start_cols[supplier]
             match = selected.get(supplier)
             group = selected_groups.get(supplier, [])
-            style_range(desc_row, value_row, start, start + 4, supplier_light_by_name[supplier])
+            style_range(desc_row, last_value_row, start, start + 4, supplier_light_by_name[supplier])
             if not match:
-                ws.merge_cells(start_row=desc_row, start_column=start, end_row=value_row, end_column=start + 4)
+                ws.merge_cells(start_row=desc_row, start_column=start, end_row=last_value_row, end_column=start + 4)
                 cell = ws.cell(desc_row, start, "нет в КП")
                 cell.font = Font(italic=True, color="667085", size=10)
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -3013,12 +3053,9 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 ws.cell(label_row, start + offset).font = Font(bold=True, size=9)
             offer = match.supplier_item
             group_offers = [candidate.supplier_item for candidate in group] or [offer]
-            max_group_lines = max(max_group_lines, len(group_offers))
             ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + 4)
-            ws.cell(desc_row, start, "\n".join(f"{item.row_no}. {item.name}" for item in group_offers))
-            ws.cell(value_row, start, "\n".join(item.row_no for item in group_offers if item.row_no))
+            ws.cell(desc_row, start, group_offers[0].name if len(group_offers) == 1 else f"{len(group_offers)} строки КП")
             normalized_price, price_display = normalized_unit_price(request_for_compare, offer)
-            ws.cell(value_row, start + 1, price_display)
             qty_check_offer = offer
             group_units = {normalized_unit(item.unit) for item in group_offers if item.unit}
             if len(group_offers) > 1 and len(group_units) <= 1:
@@ -3037,34 +3074,41 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     override_unit=offer.override_unit,
                 )
             qty_result = quantity_check(request_for_compare, qty_check_offer)
-            qty_display = "\n".join(
-                f"{fmt_qty(item.qty)} {item.unit}".strip()
-                for item in group_offers
-                if item.qty is not None or item.unit
-            )
-            ws.cell(value_row, start + 2, qty_display or qty_result.display)
-            ws.cell(value_row, start + 3, sum(offer_total_value(item) or 0 for item in group_offers))
-            ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
+            for line_idx, item in enumerate(group_offers):
+                item_row = value_row + line_idx
+                row_no = f"{item.row_no}. " if item.row_no else ""
+                ws.cell(item_row, start, f"{row_no}{item.name}".strip())
+                item_price, item_price_display = normalized_unit_price(request_for_compare, item)
+                ws.cell(item_row, start + 1, item_price_display)
+                item_qty_display = f"{fmt_qty(item.qty)} {item.unit}".strip()
+                ws.cell(item_row, start + 2, item_qty_display or (qty_result.display if len(group_offers) == 1 else ""))
+                ws.cell(item_row, start + 3, offer_total_value(item))
+                ws.cell(item_row, start + 4, delivery_mark(item.delivery))
+                if item_price is not None and min_price is not None and abs(item_price - min_price) < 0.0001:
+                    ws.cell(item_row, start + 1).fill = green
+                if item_price is not None and max_price is not None and abs(item_price - max_price) < 0.0001 and max_price != min_price:
+                    ws.cell(item_row, start + 1).fill = red
+                qty_cell = ws.cell(item_row, start + 2)
+                if qty_result.status == "ok":
+                    qty_cell.fill = green
+                elif qty_result.status == "low":
+                    qty_cell.fill = yellow
+                elif qty_result.status == "high":
+                    qty_cell.fill = green
             qty_ok = qty_result.status == "ok"
-            if normalized_price is not None and min_price is not None and abs(normalized_price - min_price) < 0.0001:
-                ws.cell(value_row, start + 1).fill = green
-            if normalized_price is not None and max_price is not None and abs(normalized_price - max_price) < 0.0001 and max_price != min_price:
-                ws.cell(value_row, start + 1).fill = red
-            qty_cell = ws.cell(value_row, start + 2)
-            if qty_result.status == "ok":
-                qty_cell.fill = green
-            elif qty_result.status == "low":
-                qty_cell.fill = yellow
-            elif qty_result.status == "high":
-                qty_cell.fill = green
             needs_review = match.status == "review" or "разные бренды" in (match.reason or "")
             if needs_review:
                 if qty_result.status == "unknown":
-                    ws.cell(value_row, start + 2).fill = yellow
-        ws.row_dimensions[desc_row].height = max(28, 20 * max_group_lines)
+                    for item_row in range(value_row, value_row + len(group_offers)):
+                        ws.cell(item_row, start + 2).fill = yellow
+            for empty_row in range(value_row + len(group_offers), last_value_row + 1):
+                for offset in range(5):
+                    ws.cell(empty_row, start + offset, "")
+        ws.row_dimensions[desc_row].height = 30
         ws.row_dimensions[label_row].height = 21
-        ws.row_dimensions[value_row].height = 25
-        row += 3
+        for item_row in range(value_row, last_value_row + 1):
+            ws.row_dimensions[item_row].height = 32
+        row = last_value_row + 1
 
     for service_index, offer in enumerate(service_items, start=1):
         desc_row = row

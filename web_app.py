@@ -26,6 +26,7 @@ from compare_tz_kp import (
     RequestItem,
     SupplierItem,
     build_matches,
+    clean_request_unit,
     clean_text,
     get_ai_warnings,
     match_score,
@@ -1655,8 +1656,7 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
       const row = input.closest('[data-review-row]');
       const unitCell = row?.querySelector('[data-request-unit]');
       if (unitCell) {{
-        const parts = [option?.dataset.qty || '', option?.dataset.unit || ''].filter(Boolean);
-        unitCell.textContent = parts.join(' ') || '—';
+        unitCell.textContent = option?.dataset.unit || '—';
       }}
     }};
     document.querySelectorAll('.match-input').forEach((input) => {{
@@ -1979,7 +1979,7 @@ def render_review(run_id: str) -> bytes:
     ]
     request_options = "\n".join(
         f'<option value="{esc(item.pos)} - {esc(item.name)}" data-full="{esc(item.pos)} - {esc(item.name)}" '
-        f'data-unit="{esc(item.unit)}" data-qty="{esc(f"{item.qty:g}".replace(".", ",") if item.qty is not None else "")}"></option>'
+        f'data-unit="{esc(clean_request_unit(item.unit, item.name, item.specs))}"></option>'
         for item in request_items
     )
     unit_options = "".join(f'<option value="{unit}"></option>' for unit in ["м2", "м3", "шт", "п.м", "м", "кг", "т", "упак"])
@@ -1989,9 +1989,8 @@ def render_review(run_id: str) -> bytes:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
         selected_value = f"{selected_item.pos} - {selected_item.name}" if selected_item else ""
         selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
-        request_unit = selected_item.unit if selected_item else ""
-        request_qty = f"{selected_item.qty:g}".replace(".", ",") if selected_item and selected_item.qty is not None else ""
-        request_unit_text = " ".join(part for part in [request_qty, request_unit] if part) or "—"
+        request_unit_text = clean_request_unit(selected_item.unit, selected_item.name, selected_item.specs) if selected_item else ""
+        request_unit_text = request_unit_text or "—"
         suggestion_buttons = ""
         suggestions = top_request_suggestions(match, request_items)
         if suggestions:
@@ -2387,7 +2386,7 @@ def supplier_items_to_request_items(items: list[SupplierItem]) -> list[RequestIt
             RequestItem(
                 pos=item.row_no or str(idx),
                 name=name,
-                unit=item.unit,
+                unit=clean_request_unit(item.unit, item.name),
                 qty=item.qty,
             )
         )

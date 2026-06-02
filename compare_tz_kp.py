@@ -432,6 +432,54 @@ def normalized_unit(unit: str) -> str:
     return unit_norm
 
 
+def display_unit(unit: str) -> str:
+    text = clean_text(unit)
+    normalized = normalized_unit(text)
+    labels = {
+        "m2": "м2",
+        "m3": "м3",
+        "m": "м",
+        "pcs": "шт",
+        "sheet": "лист",
+        "roll": "рул",
+        "pack": "упак",
+        "kg": "кг",
+        "ton": "т",
+    }
+    return labels.get(normalized, text if normalized else "")
+
+
+def is_known_unit(unit: str) -> bool:
+    return normalized_unit(unit) in {"m2", "m3", "m", "pcs", "sheet", "roll", "pack", "kg", "ton"}
+
+
+def infer_unit_from_text(text: str) -> str:
+    source = clean_text(text).lower().replace("²", "2").replace("³", "3")
+    patterns = [
+        (r"\b(?:м3|m3|куб\.?\s*м)\b", "м3"),
+        (r"\b(?:м2|m2|кв\.?\s*м)\b", "м2"),
+        (r"\b(?:п\.?\s*м|м\.?\s*п)\b", "п.м"),
+        (r"\b(?:шт|штук)\b", "шт"),
+        (r"\b(?:рул|рулон)\b", "рул"),
+        (r"\b(?:упак|упаковк)\b", "упак"),
+        (r"\bкг\b", "кг"),
+        (r"\b(?:т|тонн)\b", "т"),
+    ]
+    for pattern, unit in patterns:
+        if re.search(pattern, source):
+            return unit
+    return ""
+
+
+def clean_request_unit(unit: str, name: str = "", specs: str = "") -> str:
+    text = clean_text(unit)
+    if text and is_known_unit(text):
+        return display_unit(text)
+    if text and parse_number(text) is None and len(text) <= 16:
+        return text
+    return infer_unit_from_text(f"{name} {specs}")
+
+
 @lru_cache(maxsize=40000)
 def area_m2_from_text(text: str) -> float | None:
     normalized = normalize(text)
@@ -1070,9 +1118,9 @@ def read_request_sheet(ws) -> list[RequestItem] | None:
     for row in range(header_row + 1, ws.max_row + 1):
         pos = clean_text(ws.cell(row, pos_col).value) if pos_col != name_col else ""
         name = clean_text(ws.cell(row, name_col).value)
-        unit = clean_text(ws.cell(row, unit_col).value) if unit_col else ""
         qty = parse_number(ws.cell(row, qty_col).value) if qty_col else None
         specs = clean_text(ws.cell(row, specs_col).value) if specs_col else ""
+        unit = clean_request_unit(clean_text(ws.cell(row, unit_col).value) if unit_col else "", name, specs)
         if not name:
             continue
         if qty is None and not unit:
@@ -2848,20 +2896,8 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             unmatched.append(match.supplier_item)
 
     left_header = PatternFill("solid", fgColor="9FB6C9")
-    supplier_fills = [
-        PatternFill("solid", fgColor="D9D9D9"),
-        PatternFill("solid", fgColor="B6D7A8"),
-        PatternFill("solid", fgColor="C9DAF8"),
-        PatternFill("solid", fgColor="FCE5CD"),
-        PatternFill("solid", fgColor="D9EAD3"),
-    ]
-    supplier_light_fills = [
-        PatternFill("solid", fgColor="EFEFEF"),
-        PatternFill("solid", fgColor="E2F0D9"),
-        PatternFill("solid", fgColor="EAF2FF"),
-        PatternFill("solid", fgColor="FFF2E5"),
-        PatternFill("solid", fgColor="EEF7E8"),
-    ]
+    supplier_fills = [PatternFill("solid", fgColor="FFFFFF")]
+    supplier_light_fills = [PatternFill("solid", fgColor="FFFFFF")]
     green = PatternFill("solid", fgColor="C6EFCE")
     dark_green = PatternFill("solid", fgColor="548235")
     red = PatternFill("solid", fgColor="FFC7CE")
@@ -2927,7 +2963,9 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         ws.cell(desc_row, 2, request.name)
         ws.merge_cells(start_row=desc_row, start_column=3, end_row=value_row, end_column=3)
         qty_text = fmt_qty(request.qty)
-        ws.cell(desc_row, 3, f"{qty_text} {request.unit}".strip())
+        request_unit = clean_request_unit(request.unit, request.name, request.specs)
+        request_for_compare = RequestItem(request.pos, request.name, request.specs, request_unit, request.qty)
+        ws.cell(desc_row, 3, f"{qty_text} {request_unit}".strip())
         style_range(desc_row, value_row, 1, 3, white)
         ws.cell(label_row, 1).font = Font(size=7)
         ws.cell(value_row, 1).font = Font(size=10)
@@ -2937,6 +2975,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
 
         prices: list[tuple[str, float]] = []
         selected: dict[str, Match] = {}
+        selected_groups: dict[str, list[Match]] = {}
         for supplier in suppliers:
             candidates = by_request_supplier.get((request.pos, supplier), [])
             if candidates:
@@ -2945,40 +2984,68 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     key=lambda item: (item.status != "manual", -(item.supplier_item.price or 0), -item.score),
                 )[0]
                 selected[supplier] = chosen
-                selected_match_ids.add(id(chosen))
-                normalized_price, _ = normalized_unit_price(request, chosen.supplier_item)
+                selected_groups[supplier] = candidates
+                for candidate in candidates:
+                    selected_match_ids.add(id(candidate))
+                normalized_price, _ = normalized_unit_price(request_for_compare, chosen.supplier_item)
                 if normalized_price is not None:
                     prices.append((supplier, normalized_price))
-                supplier_goods_totals[supplier] += offer_total_value(chosen.supplier_item) or 0
+                supplier_goods_totals[supplier] += sum(offer_total_value(candidate.supplier_item) or 0 for candidate in candidates)
 
         min_price = min((price for _, price in prices), default=None)
         max_price = max((price for _, price in prices), default=None)
         ws.cell(desc_row, 2, request_name_with_notes(request.name, (match.note for match in selected.values())))
+        max_group_lines = 1
 
         for supplier in suppliers:
             start = supplier_start_cols[supplier]
             match = selected.get(supplier)
+            group = selected_groups.get(supplier, [])
             style_range(desc_row, value_row, start, start + 4, supplier_light_by_name[supplier])
             if not match:
                 ws.merge_cells(start_row=desc_row, start_column=start, end_row=value_row, end_column=start + 4)
                 cell = ws.cell(desc_row, start, "нет в КП")
                 cell.font = Font(italic=True, color="667085", size=10)
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                cell.fill = gray
+                cell.fill = white
                 continue
             subheaders = ["позиция\nв счете", "цена", "кол-во", "стоимость", "срок"]
             for offset, header in enumerate(subheaders):
                 ws.cell(label_row, start + offset, header)
                 ws.cell(label_row, start + offset).font = Font(bold=True, size=9)
             offer = match.supplier_item
+            group_offers = [candidate.supplier_item for candidate in group] or [offer]
+            max_group_lines = max(max_group_lines, len(group_offers))
             ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + 4)
-            ws.cell(desc_row, start, offer.name)
-            ws.cell(value_row, start, offer.row_no)
-            normalized_price, price_display = normalized_unit_price(request, offer)
+            ws.cell(desc_row, start, "\n".join(f"{item.row_no}. {item.name}" for item in group_offers))
+            ws.cell(value_row, start, "\n".join(item.row_no for item in group_offers if item.row_no))
+            normalized_price, price_display = normalized_unit_price(request_for_compare, offer)
             ws.cell(value_row, start + 1, price_display)
-            qty_result = quantity_check(request, offer)
-            ws.cell(value_row, start + 2, qty_result.display)
-            ws.cell(value_row, start + 3, offer_total_value(offer))
+            qty_check_offer = offer
+            group_units = {normalized_unit(item.unit) for item in group_offers if item.unit}
+            if len(group_offers) > 1 and len(group_units) <= 1:
+                qty_check_offer = SupplierItem(
+                    supplier=offer.supplier,
+                    source=offer.source,
+                    row_no=offer.row_no,
+                    name=offer.name,
+                    qty=sum(item.qty or 0 for item in group_offers),
+                    unit=offer.unit,
+                    price=offer.price,
+                    total=sum(offer_total_value(item) or 0 for item in group_offers),
+                    delivery=offer.delivery,
+                    invoice_no=offer.invoice_no,
+                    override_qty=offer.override_qty,
+                    override_unit=offer.override_unit,
+                )
+            qty_result = quantity_check(request_for_compare, qty_check_offer)
+            qty_display = "\n".join(
+                f"{fmt_qty(item.qty)} {item.unit}".strip()
+                for item in group_offers
+                if item.qty is not None or item.unit
+            )
+            ws.cell(value_row, start + 2, qty_display or qty_result.display)
+            ws.cell(value_row, start + 3, sum(offer_total_value(item) or 0 for item in group_offers))
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
             qty_ok = qty_result.status == "ok"
             if normalized_price is not None and min_price is not None and abs(normalized_price - min_price) < 0.0001:
@@ -2991,16 +3058,12 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             elif qty_result.status == "low":
                 qty_cell.fill = yellow
             elif qty_result.status == "high":
-                qty_cell.fill = dark_green
-                qty_cell.font = Font(bold=True, color="FFFFFF")
-            if ws.cell(value_row, start + 4).value == "✓":
-                ws.cell(value_row, start + 4).fill = green
+                qty_cell.fill = green
             needs_review = match.status == "review" or "разные бренды" in (match.reason or "")
             if needs_review:
-                ws.cell(desc_row, start).fill = red if "разные бренды" in (match.reason or "") else yellow
                 if qty_result.status == "unknown":
                     ws.cell(value_row, start + 2).fill = yellow
-        ws.row_dimensions[desc_row].height = 28
+        ws.row_dimensions[desc_row].height = max(28, 20 * max_group_lines)
         ws.row_dimensions[label_row].height = 21
         ws.row_dimensions[value_row].height = 25
         row += 3
@@ -3030,7 +3093,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             if supplier != offer.supplier:
                 ws.merge_cells(start_row=desc_row, start_column=start, end_row=value_row, end_column=start + 4)
                 cell = ws.cell(desc_row, start, "")
-                cell.fill = gray
+                cell.fill = white
                 continue
 
             subheaders = ["позиция\nв счете", "цена", "кол-во", "стоимость", "срок"]
@@ -3044,10 +3107,6 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.cell(value_row, start + 2, f"{service_qty} {offer.unit}".strip())
             ws.cell(value_row, start + 3, offer_total_value(offer))
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
-            ws.cell(desc_row, start).fill = yellow
-            ws.cell(value_row, start + 3).fill = yellow
-            if ws.cell(value_row, start + 4).value == "✓":
-                ws.cell(value_row, start + 4).fill = green
 
         ws.row_dimensions[desc_row].height = 28
         ws.row_dimensions[label_row].height = 21
@@ -3078,8 +3137,8 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             ws.cell(row, start + 3).font = Font(bold=True)
             ws.cell(row, start + 3).number_format = '#,##0.00 ₽'
             if label == "Итого с доставкой":
-                ws.cell(row, start).fill = green
-                ws.cell(row, start + 3).fill = green
+                ws.cell(row, start).font = Font(bold=True)
+                ws.cell(row, start + 3).font = Font(bold=True)
         ws.row_dimensions[row].height = 24
         row += 1
 

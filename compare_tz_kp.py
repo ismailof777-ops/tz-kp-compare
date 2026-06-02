@@ -1123,8 +1123,6 @@ def read_request_sheet(ws) -> list[RequestItem] | None:
         unit = clean_request_unit(clean_text(ws.cell(row, unit_col).value) if unit_col else "", name, specs)
         if not name:
             continue
-        if qty is None and not unit:
-            continue
         if not pos:
             pos = str(len(items) + 1)
         items.append(RequestItem(pos=pos, name=name, specs=specs, unit=unit, qty=qty))

@@ -1649,10 +1649,9 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
     const reviewSearch = document.querySelector('[data-review-search]');
     const reviewRows = Array.from(document.querySelectorAll('[data-review-row]'));
     const reviewCount = document.querySelector('[data-review-count]');
-    const requestOptions = Array.from(document.querySelectorAll('#request-options option'));
     const updateMatchTitle = (input) => {{
-      const option = requestOptions.find((item) => item.value === input.value);
-      input.title = option?.dataset.full || input.value || 'Оставить без сопоставления';
+      const option = input.selectedOptions?.[0];
+      input.title = option?.dataset.full || option?.textContent || 'Оставить без сопоставления';
       const row = input.closest('[data-review-row]');
       const unitCell = row?.querySelector('[data-request-unit]');
       if (unitCell) {{
@@ -1685,7 +1684,7 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
       }});
     }});
     if (reviewSearch && reviewRows.length) {{
-      const rowText = (row) => (row.textContent + ' ' + (row.querySelector('input')?.value || '')).toLowerCase();
+      const rowText = (row) => (row.textContent + ' ' + (row.querySelector('.match-input')?.value || '')).toLowerCase();
       const updateReviewSearch = () => {{
         const query = reviewSearch.value.trim().toLowerCase();
         let shown = 0;
@@ -1701,7 +1700,7 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
         }}
       }};
       reviewSearch.addEventListener('input', updateReviewSearch);
-      reviewRows.forEach((row) => row.querySelector('input')?.addEventListener('change', updateReviewSearch));
+      reviewRows.forEach((row) => row.querySelector('.match-input')?.addEventListener('change', updateReviewSearch));
       updateReviewSearch();
     }}
   </script>
@@ -1978,8 +1977,8 @@ def render_review(run_id: str) -> bytes:
         if match.status != "service" and (match.status != "auto" or not match.request_pos or match.reason)
     ]
     request_options = "\n".join(
-        f'<option value="{esc(item.pos)} - {esc(item.name)}" data-full="{esc(item.pos)} - {esc(item.name)}" '
-        f'data-unit="{esc(clean_request_unit(item.unit, item.name, item.specs))}"></option>'
+        f'<option value="{esc(item.pos)}" data-full="{esc(item.pos)} - {esc(item.name)}" '
+        f'data-unit="{esc(clean_request_unit(item.unit, item.name, item.specs))}">{esc(item.pos)} - {esc(item.name)}</option>'
         for item in request_items
     )
     unit_options = "".join(f'<option value="{unit}"></option>' for unit in ["м2", "м3", "шт", "п.м", "м", "кг", "т", "упак"])
@@ -1987,7 +1986,7 @@ def render_review(run_id: str) -> bytes:
     rows_html = ""
     for idx, match in review_rows:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
-        selected_value = f"{selected_item.pos} - {selected_item.name}" if selected_item else ""
+        selected_value = selected_item.pos if selected_item else ""
         selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
         request_unit_text = clean_request_unit(selected_item.unit, selected_item.name, selected_item.specs) if selected_item else ""
         request_unit_text = request_unit_text or "—"
@@ -1996,15 +1995,17 @@ def render_review(run_id: str) -> bytes:
         if suggestions:
             suggestion_buttons = '<div class="suggestions" aria-label="Варианты сопоставления">'
             for suggestion, score in suggestions:
-                value = f"{suggestion.pos} - {suggestion.name}"
                 full = f"{suggestion.pos} - {suggestion.name}"
                 suggestion_buttons += (
-                    f'<button class="suggestion" type="button" data-suggest="{esc(value)}" '
+                    f'<button class="suggestion" type="button" data-suggest="{esc(suggestion.pos)}" '
                     f'title="{esc(full)}">{esc(suggestion.pos)} <span class="suggestion-label">совпадение {round(score * 100)}%</span></button>'
                 )
             suggestion_buttons += "</div>"
         match_input = f"""
-<input class="match-input with-tooltip" type="text" name="match_{idx}" list="request-options" value="{esc(selected_value)}" title="{esc(selected_title)}" placeholder="Начните вводить название или номер позиции">
+<select class="match-input with-tooltip" name="match_{idx}" title="{esc(selected_title)}" autocomplete="off">
+  <option value="">Не сопоставлять</option>
+  {request_options.replace(f'value="{esc(selected_value)}"', f'value="{esc(selected_value)}" selected', 1) if selected_value else request_options}
+</select>
 <div class="match-actions">
   <button class="clear-match" type="button" data-clear-match>Не сопоставлять</button>
   <span class="match-help">Если строка КП лишняя или не относится к заявке.</span>
@@ -2039,9 +2040,6 @@ def render_review(run_id: str) -> bytes:
     if rows_html:
         review_html = f"""
 <form class="review-form" action="/finalize/{esc(run_id)}" method="post">
-  <datalist id="request-options">
-    {request_options}
-  </datalist>
   <datalist id="unit-options">
     {unit_options}
   </datalist>

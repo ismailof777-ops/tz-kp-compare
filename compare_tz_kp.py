@@ -480,6 +480,10 @@ def clean_request_unit(unit: str, name: str = "", specs: str = "") -> str:
     return infer_unit_from_text(f"{name} {specs}")
 
 
+def request_display_unit(request: RequestItem) -> str:
+    return clean_request_unit(request.unit, request.name, request.specs) or "шт"
+
+
 def request_detail_display(request: RequestItem, unit: str) -> str:
     details: list[str] = []
     qty_text = fmt_qty(request.qty)
@@ -2914,6 +2918,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     wb = Workbook()
     ws = wb.active
     ws.title = "Сводка"
+    supplier_cols = 7
 
     suppliers = sorted({m.supplier_item.supplier for m in matches})
     by_request_supplier: dict[tuple[str, str], list[Match]] = {}
@@ -2972,7 +2977,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         light_fill = supplier_light_fills[idx % len(supplier_light_fills)]
         supplier_fill_by_name[supplier] = header_fill
         supplier_light_by_name[supplier] = light_fill
-        ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col + 4)
+        ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col + supplier_cols - 1)
         invoices = supplier_invoice_summary(supplier, matches)
         header_text = supplier
         if invoices:
@@ -2980,8 +2985,8 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         ws.cell(1, col, header_text)
         ws.cell(1, col).font = Font(bold=True, color="1F2933", size=10)
         ws.cell(1, col).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        style_range(1, 2, col, col + 4, header_fill)
-        col += 5
+        style_range(1, 2, col, col + supplier_cols - 1, header_fill)
+        col += supplier_cols
 
     ws.row_dimensions[1].height = 52
     ws.row_dimensions[2].height = 42
@@ -2993,7 +2998,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         prices: list[tuple[str, float]] = []
         selected: dict[str, Match] = {}
         selected_groups: dict[str, list[Match]] = {}
-        request_unit = clean_request_unit(request.unit, request.name, request.specs)
+        request_unit = request_display_unit(request)
         request_for_compare = RequestItem(request.pos, request.name, request.specs, request_unit, request.qty)
         for supplier in suppliers:
             candidates = by_request_supplier.get((request.pos, supplier), [])
@@ -3039,22 +3044,22 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             start = supplier_start_cols[supplier]
             match = selected.get(supplier)
             group = selected_groups.get(supplier, [])
-            style_range(desc_row, last_value_row, start, start + 4, supplier_light_by_name[supplier])
+            style_range(desc_row, last_value_row, start, start + supplier_cols - 1, supplier_light_by_name[supplier])
             if not match:
-                ws.merge_cells(start_row=desc_row, start_column=start, end_row=last_value_row, end_column=start + 4)
+                ws.merge_cells(start_row=desc_row, start_column=start, end_row=last_value_row, end_column=start + supplier_cols - 1)
                 cell = ws.cell(desc_row, start, "нет в КП")
                 cell.font = Font(italic=True, color="667085", size=10)
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                 cell.fill = white
                 continue
-            subheaders = ["позиция\nв счете", "цена", "кол-во", "стоимость", "срок"]
+            subheaders = ["позиция\nв счете", "цена\nКП", "кол-во\nКП", "стоимость", "срок", "кол-во\nзаявки", "цена за ед.\nзаявки"]
             for offset, header in enumerate(subheaders):
                 ws.cell(label_row, start + offset, header)
                 ws.cell(label_row, start + offset).font = Font(bold=True, size=9)
             offer = match.supplier_item
             group_offers = [candidate.supplier_item for candidate in group] or [offer]
-            ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + 4)
-            ws.cell(desc_row, start, group_offers[0].name if len(group_offers) == 1 else f"{len(group_offers)} строки КП")
+            ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + supplier_cols - 1)
+            ws.cell(desc_row, start, request.name if len(group_offers) > 1 else group_offers[0].name)
             normalized_price, price_display = normalized_unit_price(request_for_compare, offer)
             qty_check_offer = offer
             group_units = {normalized_unit(item.unit) for item in group_offers if item.unit}
@@ -3084,6 +3089,8 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 ws.cell(item_row, start + 2, item_qty_display or (qty_result.display if len(group_offers) == 1 else ""))
                 ws.cell(item_row, start + 3, offer_total_value(item))
                 ws.cell(item_row, start + 4, delivery_mark(item.delivery))
+                ws.cell(item_row, start + 5, f"{fmt_qty(request.qty)} {request_unit}".strip())
+                ws.cell(item_row, start + 6, item_price)
                 if item_price is not None and min_price is not None and abs(item_price - min_price) < 0.0001:
                     ws.cell(item_row, start + 1).fill = green
                 if item_price is not None and max_price is not None and abs(item_price - max_price) < 0.0001 and max_price != min_price:
@@ -3102,7 +3109,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                     for item_row in range(value_row, value_row + len(group_offers)):
                         ws.cell(item_row, start + 2).fill = yellow
             for empty_row in range(value_row + len(group_offers), last_value_row + 1):
-                for offset in range(5):
+                for offset in range(supplier_cols):
                     ws.cell(empty_row, start + offset, "")
         ws.row_dimensions[desc_row].height = 30
         ws.row_dimensions[label_row].height = 21
@@ -3131,24 +3138,26 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
 
         for supplier in suppliers:
             start = supplier_start_cols[supplier]
-            style_range(desc_row, value_row, start, start + 4, supplier_light_by_name[supplier])
+            style_range(desc_row, value_row, start, start + supplier_cols - 1, supplier_light_by_name[supplier])
             if supplier != offer.supplier:
-                ws.merge_cells(start_row=desc_row, start_column=start, end_row=value_row, end_column=start + 4)
+                ws.merge_cells(start_row=desc_row, start_column=start, end_row=value_row, end_column=start + supplier_cols - 1)
                 cell = ws.cell(desc_row, start, "")
                 cell.fill = white
                 continue
 
-            subheaders = ["позиция\nв счете", "цена", "кол-во", "стоимость", "срок"]
+            subheaders = ["позиция\nв счете", "цена\nКП", "кол-во\nКП", "стоимость", "срок", "кол-во\nзаявки", "цена за ед.\nзаявки"]
             for offset, header in enumerate(subheaders):
                 ws.cell(label_row, start + offset, header)
                 ws.cell(label_row, start + offset).font = Font(bold=True, size=9)
-            ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + 4)
+            ws.merge_cells(start_row=desc_row, start_column=start, end_row=desc_row, end_column=start + supplier_cols - 1)
             ws.cell(desc_row, start, offer.name)
             ws.cell(value_row, start, offer.row_no)
             ws.cell(value_row, start + 1, offer.price)
             ws.cell(value_row, start + 2, f"{service_qty} {offer.unit}".strip())
             ws.cell(value_row, start + 3, offer_total_value(offer))
             ws.cell(value_row, start + 4, delivery_mark(offer.delivery))
+            ws.cell(value_row, start + 5, "")
+            ws.cell(value_row, start + 6, offer.price)
 
         ws.row_dimensions[desc_row].height = 28
         ws.row_dimensions[label_row].height = 21
@@ -3171,7 +3180,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
         style_range(row, row, 1, 3, left_header)
         for supplier in suppliers:
             start = supplier_start_cols[supplier]
-            style_range(row, row, start, start + 4, supplier_light_by_name[supplier])
+            style_range(row, row, start, start + supplier_cols - 1, supplier_light_by_name[supplier])
             ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=start + 2)
             ws.cell(row, start, label)
             ws.cell(row, start).font = Font(bold=True)
@@ -3194,15 +3203,20 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
     for col_idx, width in widths.items():
         ws.column_dimensions[get_column_letter(col_idx)].width = width
     for col_idx in range(4, ws.max_column + 1):
-        offset = (col_idx - 4) % 5
-        width = [9, 13, 12, 14, 16][offset]
+        offset = (col_idx - 4) % supplier_cols
+        width = [18, 13, 12, 14, 14, 13, 15][offset]
         ws.column_dimensions[get_column_letter(col_idx)].width = width
-    for price_col in range(5, ws.max_column + 1, 5):
+    for price_col in range(5, ws.max_column + 1, supplier_cols):
         for price_cell in ws.iter_cols(min_col=price_col, max_col=price_col, min_row=3, max_row=ws.max_row):
             for cell in price_cell:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
-    for total_col in range(7, ws.max_column + 1, 5):
+    for unit_price_col in range(10, ws.max_column + 1, supplier_cols):
+        for price_cell in ws.iter_cols(min_col=unit_price_col, max_col=unit_price_col, min_row=3, max_row=ws.max_row):
+            for cell in price_cell:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0.00 ₽'
+    for total_col in range(7, ws.max_column + 1, supplier_cols):
         for total_cell in ws.iter_cols(min_col=total_col, max_col=total_col, min_row=3, max_row=ws.max_row):
             for cell in total_cell:
                 if isinstance(cell.value, (int, float)):

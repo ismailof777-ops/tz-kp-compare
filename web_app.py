@@ -33,6 +33,7 @@ from compare_tz_kp import (
     parse_number,
     read_offer,
     read_request_xlsx,
+    request_display_unit,
     status_label,
     write_final,
     write_review,
@@ -1978,7 +1979,7 @@ def render_review(run_id: str) -> bytes:
     ]
     request_options = "\n".join(
         f'<option value="{esc(item.pos)}" data-full="{esc(item.pos)} - {esc(item.name)}" '
-        f'data-unit="{esc(clean_request_unit(item.unit, item.name, item.specs))}">{esc(item.pos)} - {esc(item.name)}</option>'
+        f'data-unit="{esc(request_display_unit(item))}">{esc(item.pos)} - {esc(item.name)}</option>'
         for item in request_items
     )
     unit_options = "".join(f'<option value="{unit}"></option>' for unit in ["м2", "м3", "шт", "п.м", "м", "кг", "т", "упак"])
@@ -1988,7 +1989,7 @@ def render_review(run_id: str) -> bytes:
         selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
         selected_value = selected_item.pos if selected_item else ""
         selected_title = f"{selected_item.pos} - {selected_item.name}" if selected_item else "Оставить без сопоставления"
-        request_unit_text = clean_request_unit(selected_item.unit, selected_item.name, selected_item.specs) if selected_item else ""
+        request_unit_text = request_display_unit(selected_item) if selected_item else ""
         request_unit_text = request_unit_text or "—"
         suggestion_buttons = ""
         suggestions = top_request_suggestions(match, request_items)

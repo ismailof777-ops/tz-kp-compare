@@ -51,6 +51,17 @@ def record_ai_warning(message: str) -> None:
         AI_WARNINGS.append(message)
 
 
+def atomic_save_workbook(wb: Workbook, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        wb.save(temp_path)
+        temp_path.replace(path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
 def deepseek_api_url() -> str:
     api_url = os.environ.get("DEEPSEEK_API_URL", "").strip()
     if api_url:
@@ -2531,18 +2542,15 @@ def improve_matches_with_deepseek(
     if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
         return add_low_confidence_review_suggestions(request_items, matches)
 
-    request_payload = [
-        {
-            "pos": item.pos,
-            "name": item.name,
-            "specs": item.specs,
-            "unit": item.unit,
-            "qty": item.qty,
-            "area_m2_hint": area_m2_from_text(item.name),
-        }
-        for item in request_items
-    ]
     by_pos = {item.pos: item for item in request_items}
+    by_pos_index = {item.pos: idx for idx, item in enumerate(request_items)}
+    token_index: dict[str, set[int]] = {}
+    num_index: dict[str, set[int]] = {}
+    for idx, request in enumerate(request_items):
+        for token in tokens(request.name):
+            token_index.setdefault(token, set()).add(idx)
+        for number in numeric_tokens(request.name):
+            num_index.setdefault(number, set()).add(idx)
     ai_scope = os.environ.get("DEEPSEEK_AI_SCOPE", "all").strip().lower()
     if ai_scope == "all":
         need_ai = [(idx, match) for idx, match in enumerate(matches) if match.status != "service"]
@@ -2554,6 +2562,7 @@ def improve_matches_with_deepseek(
         ]
     max_rows = int(os.environ.get("DEEPSEEK_MAX_AI_ROWS", "300"))
     batch_size = int(os.environ.get("DEEPSEEK_BATCH_SIZE", "20"))
+    candidates_per_row = int(os.environ.get("DEEPSEEK_CANDIDATES_PER_ROW", "30"))
     updated = list(matches)
     total_to_check = min(len(need_ai), max_rows)
     if progress_callback:
@@ -2561,8 +2570,35 @@ def improve_matches_with_deepseek(
     if len(need_ai) > max_rows:
         record_ai_warning(f"DeepSeek проверил только первые {max_rows} строк КП из {len(need_ai)} по текущему лимиту.")
 
+    def request_payload_item(item: RequestItem) -> dict:
+        return {
+            "pos": item.pos,
+            "name": item.name,
+            "specs": item.specs,
+            "unit": item.unit,
+            "qty": item.qty,
+            "area_m2_hint": area_m2_from_text(item.name),
+        }
+
+    def ai_request_indexes(match: Match) -> set[int]:
+        offer = match.supplier_item
+        candidate_indexes = candidate_request_indexes(offer, request_items, token_index, num_index)
+        ranked: list[tuple[float, int]] = []
+        for idx in candidate_indexes:
+            score, _ = match_score(request_items[idx].name, offer.name)
+            ranked.append((score, idx))
+        ranked.sort(reverse=True)
+        selected = {idx for _, idx in ranked[:candidates_per_row]}
+        if match.request_pos and match.request_pos in by_pos_index:
+            selected.add(by_pos_index[match.request_pos])
+        return selected or set(range(min(len(request_items), candidates_per_row)))
+
     for start in range(0, total_to_check, batch_size):
         batch = need_ai[start : start + batch_size]
+        request_indexes: set[int] = set()
+        for _, match in batch:
+            request_indexes.update(ai_request_indexes(match))
+        request_payload = [request_payload_item(request_items[idx]) for idx in sorted(request_indexes)]
         offer_payload = [
             {
                 "offer_id": idx,
@@ -2751,7 +2787,7 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
                 status_label(match.status),
                 match.request_pos or "",
                 request.name if request else "",
-                request.unit if request else "",
+                request_display_unit(request) if request else "",
                 request.qty if request else "",
                 match.supplier_item.supplier,
                 match.supplier_item.row_no,
@@ -2774,7 +2810,7 @@ def write_review(path: Path, matches: list[Match], request_items: list[RequestIt
     widths = [14, 22, 48, 10, 12, 22, 12, 62, 12, 8, 12, 14, 18, 12, 12, 34, 40, 32]
     for idx, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
-    wb.save(path)
+    atomic_save_workbook(wb, path)
 
 
 def read_review_overrides(path: Path) -> dict[tuple[str, str, str], str | None]:
@@ -3356,7 +3392,7 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
 
-    wb.save(path)
+    atomic_save_workbook(wb, path)
 
 
 def dump_json(path: Path, request_items: list[RequestItem], supplier_items: list[SupplierItem], matches: list[Match]) -> None:

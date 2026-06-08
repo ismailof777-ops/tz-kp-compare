@@ -45,6 +45,8 @@ RUNS_DIR = ROOT / "outputs" / "runs"
 MAX_UPLOAD_SIZE = 80 * 1024 * 1024
 AI_JOBS: dict[str, dict[str, object]] = {}
 AI_JOBS_LOCK = threading.Lock()
+RUN_LOCKS: dict[str, threading.Lock] = {}
+RUN_LOCKS_LOCK = threading.Lock()
 
 
 class UploadedFile:
@@ -1341,6 +1343,15 @@ def get_ai_job(run_id: str) -> dict[str, object]:
         return payload
 
 
+def get_run_lock(run_id: str) -> threading.Lock:
+    with RUN_LOCKS_LOCK:
+        lock = RUN_LOCKS.get(run_id)
+        if lock is None:
+            lock = threading.Lock()
+            RUN_LOCKS[run_id] = lock
+        return lock
+
+
 def page(title: str, body: str, wide: bool = False) -> bytes:
     shell_class = "shell is-wide" if wide else "shell"
     html_doc = f"""<!doctype html>
@@ -1439,19 +1450,24 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
         if (processingMessage) processingMessage.textContent = data.message || 'Обработка файлов';
       }};
       const pollUploadProgress = async (runId) => {{
-        const response = await fetch('/progress/' + encodeURIComponent(runId), {{ cache: 'no-store' }});
-        const data = await response.json();
-        setUploadProgress(data);
-        if (data.state === 'done') {{
-          window.location.href = data.redirect || ('/review/' + runId);
-          return;
-        }}
-        if (data.state === 'error') {{
+        try {{
+          const response = await fetch('/progress/' + encodeURIComponent(runId), {{ cache: 'no-store' }});
+          const data = await response.json();
+          setUploadProgress(data);
+          if (data.state === 'done') {{
+            window.location.href = data.redirect || ('/review/' + runId);
+            return;
+          }}
+          if (data.state === 'error') {{
+            resetProcessingState();
+            showMessage(data.message || 'Не удалось обработать файлы.');
+            return;
+          }}
+          setTimeout(() => pollUploadProgress(runId), 900);
+        }} catch (error) {{
           resetProcessingState();
-          showMessage(data.message || 'Не удалось обработать файлы.');
-          return;
+          showMessage('Не удалось получить статус обработки. Обновите страницу или попробуйте запустить заново.');
         }}
-        setTimeout(() => pollUploadProgress(runId), 700);
       }};
       const removeInputFile = (input, indexToRemove) => {{
         const transfer = new DataTransfer();
@@ -1589,6 +1605,7 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
       }});
       uploadForm.addEventListener('submit', async (event) => {{
         event.preventDefault();
+        if (activeController) return;
         if (!requestInput || !requestInput.files.length) {{
           showMessage('Выберите файл заявки / ТЗ.');
           requestInput && requestInput.focus();
@@ -1647,6 +1664,21 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
         }}
       }});
     }}
+    document.querySelectorAll('[data-finalize-form]').forEach((form) => {{
+      let submitting = false;
+      form.addEventListener('submit', (event) => {{
+        if (submitting) {{
+          event.preventDefault();
+          return;
+        }}
+        submitting = true;
+        const button = form.querySelector('[data-finalize-submit]');
+        if (button) {{
+          button.disabled = true;
+          button.textContent = 'Формируем Excel-отчет...';
+        }}
+      }});
+    }});
     const reviewSearch = document.querySelector('[data-review-search]');
     const reviewRows = Array.from(document.querySelectorAll('[data-review-row]'));
     const reviewCount = document.querySelector('[data-review-count]');
@@ -2040,7 +2072,7 @@ def render_review(run_id: str) -> bytes:
 
     if rows_html:
         review_html = f"""
-<form class="review-form" action="/finalize/{esc(run_id)}" method="post">
+<form class="review-form" action="/finalize/{esc(run_id)}" method="post" data-finalize-form>
   <datalist id="unit-options">
     {unit_options}
   </datalist>
@@ -2081,7 +2113,7 @@ def render_review(run_id: str) -> bytes:
       Сервис применит ручные правки, сохранит спорные решения и пересоберет сводку по поставщикам.
     </div>
     <div class="actions">
-      <button class="btn" type="submit">Сформировать Excel-отчет</button>
+      <button class="btn" type="submit" data-finalize-submit>Сформировать Excel-отчет</button>
       <a class="btn secondary" href="/download/{esc(run_id)}/review.xlsx" download>Скачать файл проверки</a>
       <a class="btn secondary" href="/">Новая обработка</a>
     </div>
@@ -2642,34 +2674,56 @@ class AppHandler(BaseHTTPRequestHandler):
         if not (run_dir / "state.json").exists():
             self.send_html(render_home("Обработка не найдена. Загрузите файлы заново."), HTTPStatus.NOT_FOUND)
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
-        form = parse_qs(raw_body)
-        request_items, matches, errors = load_state(run_dir)
-        updated: list[Match] = []
-        for idx, match in enumerate(matches):
-            field_name = f"match_{idx}"
-            norm_qty = parse_number(form.get(f"norm_qty_{idx}", [""])[0])
-            norm_unit = clean_text(form.get(f"norm_unit_{idx}", [""])[0])
-            note = clean_text(form.get(f"note_{idx}", [match.note])[0])
-            supplier_item = match.supplier_item
-            if norm_qty is not None and norm_qty > 0 and norm_unit:
-                supplier_item = replace(supplier_item, override_qty=norm_qty, override_unit=norm_unit)
-            elif f"norm_qty_{idx}" in form or f"norm_unit_{idx}" in form:
-                supplier_item = replace(supplier_item, override_qty=None, override_unit="")
-            if field_name in form:
-                request_pos = resolve_request_pos(form[field_name][0], request_items)
-                if request_pos:
-                    updated.append(Match(supplier_item, request_pos, match.score, "manual", "подтверждено на проверке", note))
-                else:
-                    updated.append(Match(supplier_item, None, match.score, "unmatched", "оставлено без сопоставления", note))
+        run_lock = get_run_lock(run_id)
+        if not run_lock.acquire(blocking=False):
+            if (run_dir / "summary.xlsx").exists():
+                self.redirect(f"/done/{run_id}")
             else:
-                updated.append(Match(supplier_item, match.request_pos, match.score, match.status, match.reason, note))
+                self.send_html(
+                    page(
+                        "Отчет формируется",
+                        """
+<section class="panel">
+  <span class="ready-badge">В работе</span>
+  <h1>Excel-отчет уже формируется</h1>
+  <p class="subtitle">Дождитесь завершения текущей обработки и не запускайте формирование повторно.</p>
+</section>
+""",
+                    ),
+                    HTTPStatus.CONFLICT,
+                )
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
+            form = parse_qs(raw_body)
+            request_items, matches, errors = load_state(run_dir)
+            updated: list[Match] = []
+            for idx, match in enumerate(matches):
+                field_name = f"match_{idx}"
+                norm_qty = parse_number(form.get(f"norm_qty_{idx}", [""])[0])
+                norm_unit = clean_text(form.get(f"norm_unit_{idx}", [""])[0])
+                note = clean_text(form.get(f"note_{idx}", [match.note])[0])
+                supplier_item = match.supplier_item
+                if norm_qty is not None and norm_qty > 0 and norm_unit:
+                    supplier_item = replace(supplier_item, override_qty=norm_qty, override_unit=norm_unit)
+                elif f"norm_qty_{idx}" in form or f"norm_unit_{idx}" in form:
+                    supplier_item = replace(supplier_item, override_qty=None, override_unit="")
+                if field_name in form:
+                    request_pos = resolve_request_pos(form[field_name][0], request_items)
+                    if request_pos:
+                        updated.append(Match(supplier_item, request_pos, match.score, "manual", "подтверждено на проверке", note))
+                    else:
+                        updated.append(Match(supplier_item, None, match.score, "unmatched", "оставлено без сопоставления", note))
+                else:
+                    updated.append(Match(supplier_item, match.request_pos, match.score, match.status, match.reason, note))
 
-        write_review(run_dir / "review.xlsx", updated, request_items)
-        write_final(run_dir / "summary.xlsx", request_items, updated)
-        save_state(run_dir, request_items, updated, errors)
-        self.redirect(f"/done/{run_id}")
+            write_review(run_dir / "review.xlsx", updated, request_items)
+            write_final(run_dir / "summary.xlsx", request_items, updated)
+            save_state(run_dir, request_items, updated, errors)
+            self.redirect(f"/done/{run_id}")
+        finally:
+            run_lock.release()
 
     def handle_rerun_ai(self, run_id: str) -> None:
         run_dir = RUNS_DIR / run_id

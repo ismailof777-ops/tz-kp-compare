@@ -54,6 +54,7 @@ ROOT = Path(__file__).resolve().parent
 OUTPUTS_DIR = ROOT / "outputs"
 RUNS_DIR = ROOT / "outputs" / "runs"
 APP_DB = ROOT / "outputs" / "app.db"
+REACT_DIST = ROOT / "frontend" / "dist"
 MAX_UPLOAD_SIZE = 80 * 1024 * 1024
 AI_JOBS: dict[str, dict[str, object]] = {}
 AI_JOBS_LOCK = threading.Lock()
@@ -3818,6 +3819,38 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_react_app(self, fallback: bytes | None = None, status: HTTPStatus = HTTPStatus.OK) -> bool:
+        index_path = REACT_DIST / "index.html"
+        if not index_path.exists():
+            if fallback is not None:
+                self.send_html(fallback, status)
+                return True
+            return False
+        data = index_path.read_bytes()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+        return True
+
+    def serve_react_asset(self, path: str, send_body: bool = True) -> None:
+        assets_root = (REACT_DIST / "assets").resolve()
+        asset_path = (REACT_DIST / path.lstrip("/")).resolve()
+        if assets_root not in asset_path.parents or not asset_path.exists() or not asset_path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
+        data = asset_path.read_bytes() if send_body else b""
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(asset_path.stat().st_size))
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(data)
+
     def wants_json(self) -> bool:
         return "application/json" in self.headers.get("Accept", "").lower()
 
@@ -3835,16 +3868,19 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/assets/"):
+            self.serve_react_asset(path)
+            return
         if path == "/login":
             next_url = parse_qs(parsed.query).get("next", ["/"])[0] or "/"
-            self.send_html(render_login(next_url=next_url))
+            self.send_react_app(render_login(next_url=next_url))
             return
         if path == "/forgot-password":
-            self.send_html(render_forgot_password())
+            self.send_react_app(render_forgot_password())
             return
         if path == "/reset-password":
             token = parse_qs(parsed.query).get("token", [""])[0]
-            self.send_html(render_reset_password(token))
+            self.send_react_app(render_reset_password(token))
             return
         if path == "/logout":
             log_action("logout", username=self.current_user(), ip=self.client_ip())
@@ -3856,7 +3892,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/":
             if not self.require_auth(path):
                 return
-            self.send_html(render_home())
+            self.send_react_app(render_home())
             return
         if path == "/privacy":
             self.send_html(render_privacy())
@@ -3907,7 +3943,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/done/"):
             run_id = safe_filename(unquote(path.removeprefix("/done/")), "run")
-            self.send_html(render_done(run_id))
+            self.send_react_app(render_done(run_id))
             return
         if path.startswith("/download/"):
             self.serve_download(path)
@@ -3920,6 +3956,9 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/assets/"):
+            self.serve_react_asset(parsed.path, send_body=False)
+            return
         if parsed.path not in PUBLIC_GET_PATHS and not self.require_auth(parsed.path):
             return
         if parsed.path.startswith("/download/"):

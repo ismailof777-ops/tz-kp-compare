@@ -8,6 +8,8 @@ venv/
 .tessdata/
 outputs/
 extracted/
+frontend/node_modules/
+frontend/dist/
 Gmail.zip
 *.jpg
 *.jpeg

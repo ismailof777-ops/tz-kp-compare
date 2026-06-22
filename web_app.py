@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.parser import BytesParser
 from email.policy import default as email_policy
 import hashlib
@@ -14,11 +14,13 @@ import os
 import re
 import secrets
 import shutil
+import smtplib
 import sqlite3
 import sys
 import threading
 import uuid
 from dataclasses import asdict, replace
+from email.message import EmailMessage
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -62,11 +64,12 @@ SESSION_TTL_SECONDS = 60 * 60 * 12
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "Merenov.kirill@mail.ru")
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 ALLOW_DEV_ADMIN = os.environ.get("ALLOW_DEV_ADMIN", "") == "1"
 SESSION_SECRET_FALLBACK = secrets.token_urlsafe(32)
-PUBLIC_GET_PATHS = {"/login", "/privacy", "/favicon.ico", "/robots.txt"}
-PUBLIC_POST_PATHS = {"/login"}
+PUBLIC_GET_PATHS = {"/login", "/forgot-password", "/reset-password", "/privacy", "/favicon.ico", "/robots.txt"}
+PUBLIC_POST_PATHS = {"/login", "/forgot-password", "/reset-password"}
 
 
 class UploadedFile:
@@ -1579,6 +1582,16 @@ def init_db() -> None:
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash);
             """
         )
 
@@ -1650,6 +1663,114 @@ def set_stored_admin_password_hash(stored_hash: str) -> None:
             """,
             (stored_hash, now_iso()),
         )
+
+
+def stored_admin_email() -> str:
+    try:
+        with db_connect() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = 'admin_email'").fetchone()
+            return clean_text(row["value"]) if row else clean_text(ADMIN_EMAIL)
+    except Exception:
+        return clean_text(ADMIN_EMAIL)
+
+
+def set_stored_admin_email(email: str) -> None:
+    with db_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings(key, value, updated_at)
+            VALUES ('admin_email', ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (clean_text(email), now_iso()),
+        )
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_password_reset_token(email: str, ip: str = "") -> str:
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(minutes=30)).replace(microsecond=0).isoformat() + "Z"
+    with db_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO password_reset_tokens(token_hash, email, created_at, expires_at, ip)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (token_hash(token), clean_text(email), now_iso(), expires_at, ip),
+        )
+    return token
+
+
+def load_password_reset_token(token: str) -> sqlite3.Row | None:
+    if not token:
+        return None
+    with db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, email, expires_at, used_at
+            FROM password_reset_tokens
+            WHERE token_hash = ?
+            """,
+            (token_hash(token),),
+        ).fetchone()
+    if not row or row["used_at"]:
+        return None
+    try:
+        expires = datetime.fromisoformat(row["expires_at"].replace("Z", ""))
+    except Exception:
+        return None
+    if expires < datetime.utcnow():
+        return None
+    return row
+
+
+def mark_password_reset_token_used(token: str) -> None:
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE password_reset_tokens SET used_at = ? WHERE token_hash = ?",
+            (now_iso(), token_hash(token)),
+        )
+
+
+def absolute_url(path: str, handler: BaseHTTPRequestHandler | None = None) -> str:
+    if handler:
+        proto = "https" if handler.headers.get("X-Forwarded-Proto", "").lower() == "https" else "http"
+        host = handler.headers.get("Host", "127.0.0.1:8000")
+        return f"{proto}://{host}{path}"
+    return path
+
+
+def send_password_reset_email(email: str, reset_url: str) -> tuple[bool, str]:
+    host = os.environ.get("SMTP_HOST", "")
+    if not host:
+        return False, "SMTP_HOST is not configured"
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    username = os.environ.get("SMTP_USERNAME", "")
+    password = os.environ.get("SMTP_PASSWORD", "")
+    sender = os.environ.get("SMTP_FROM", username or email)
+    use_tls = os.environ.get("SMTP_USE_TLS", "1") != "0"
+    message = EmailMessage()
+    message["Subject"] = "Сброс пароля approvemoscow.ru"
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(
+        "Для смены пароля администратора откройте ссылку:\n\n"
+        f"{reset_url}\n\n"
+        "Ссылка действует 30 минут. Если вы не запрашивали сброс, просто игнорируйте письмо."
+    )
+    try:
+        with smtplib.SMTP(host, port, timeout=20) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if username or password:
+                smtp.login(username, password)
+            smtp.send_message(message)
+        return True, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
 
 
 def verify_password(password: str) -> bool:
@@ -2915,8 +3036,9 @@ def render_privacy() -> bytes:
     return page("Политика обработки персональных данных", body)
 
 
-def render_login(error: str = "", next_url: str = "/") -> bytes:
+def render_login(error: str = "", next_url: str = "/", message: str = "") -> bytes:
     error_html = f'<div class="notice error">{esc(error)}</div>' if error else ""
+    message_html = f'<div class="notice">{esc(message)}</div>' if message else ""
     config_notice = ""
     if not ADMIN_PASSWORD_HASH and not ADMIN_PASSWORD and not ALLOW_DEV_ADMIN:
         config_notice = '<div class="notice warn">Пароль администратора не настроен. Задайте ADMIN_PASSWORD_HASH или ADMIN_PASSWORD в переменных окружения.</div>'
@@ -2926,6 +3048,7 @@ def render_login(error: str = "", next_url: str = "/") -> bytes:
   <h1>Вход в сервис</h1>
   <p class="subtitle">Введите логин и пароль администратора, чтобы работать с загрузкой КП, историей и базой закупок.</p>
   {error_html}
+  {message_html}
   {config_notice}
   <form class="auth-form" action="/login" method="post">
     <input type="hidden" name="next" value="{esc(next_url)}">
@@ -2938,10 +3061,69 @@ def render_login(error: str = "", next_url: str = "/") -> bytes:
       <input class="text-input" type="password" name="password" autocomplete="current-password" required>
     </label>
     <button class="btn primary-wide" type="submit">Войти</button>
+    <a class="template-link" href="/forgot-password">Забыли пароль?</a>
   </form>
 </section>
 """
     return page("Вход", body)
+
+
+def render_forgot_password(message: str = "", error: str = "") -> bytes:
+    message_html = f'<div class="notice">{esc(message)}</div>' if message else ""
+    error_html = f'<div class="notice error">{esc(error)}</div>' if error else ""
+    body = f"""
+<section class="auth-shell panel">
+  <span class="ready-badge">Восстановление</span>
+  <h1>Сброс пароля</h1>
+  <p class="subtitle">Введите email администратора. Если он совпадает с настройками сервиса, на него будет отправлена ссылка для смены пароля.</p>
+  {message_html}
+  {error_html}
+  <form class="auth-form" action="/forgot-password" method="post">
+    <label>
+      Email администратора
+      <input class="text-input" type="email" name="email" autocomplete="email" required>
+    </label>
+    <button class="btn primary-wide" type="submit">Отправить ссылку</button>
+    <a class="template-link" href="/login">Вернуться ко входу</a>
+  </form>
+</section>
+"""
+    return page("Сброс пароля", body)
+
+
+def render_reset_password(token: str, message: str = "", error: str = "") -> bytes:
+    message_html = f'<div class="notice">{esc(message)}</div>' if message else ""
+    error_html = f'<div class="notice error">{esc(error)}</div>' if error else ""
+    token_ok = bool(load_password_reset_token(token))
+    form_html = """
+    <a class="btn secondary" href="/forgot-password">Запросить новую ссылку</a>
+""" if not token_ok else f"""
+  <form class="auth-form" action="/reset-password" method="post">
+    <input type="hidden" name="token" value="{esc(token)}">
+    <label>
+      Новый пароль
+      <input class="text-input" type="password" name="new_password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <label>
+      Повторите новый пароль
+      <input class="text-input" type="password" name="confirm_password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <button class="btn primary-wide" type="submit">Сохранить новый пароль</button>
+  </form>
+"""
+    if not token_ok and not error:
+        error_html = '<div class="notice error">Ссылка недействительна или срок действия истек.</div>'
+    body = f"""
+<section class="auth-shell panel">
+  <span class="ready-badge">Восстановление</span>
+  <h1>Новый пароль</h1>
+  <p class="subtitle">Ссылка действует 30 минут и может быть использована только один раз.</p>
+  {message_html}
+  {error_html}
+  {form_html}
+</section>
+"""
+    return page("Новый пароль", body)
 
 
 def admin_tabs(active: str) -> str:
@@ -3182,6 +3364,7 @@ def render_security(message: str = "", error: str = "") -> bytes:
     message_html = f'<div class="notice">{esc(message)}</div>' if message else ""
     error_html = f'<div class="notice error">{esc(error)}</div>' if error else ""
     source = "из админки" if stored_admin_password_hash() else "из переменных окружения"
+    admin_email = stored_admin_email()
     body = f"""
 <div class="topbar">
   <div>
@@ -3213,8 +3396,23 @@ def render_security(message: str = "", error: str = "") -> bytes:
     </form>
   </section>
   <section class="panel">
+    <h2>Email для восстановления</h2>
+    <p class="subtitle">Сейчас используется: {esc(admin_email)}. На этот адрес отправляется ссылка сброса пароля.</p>
+    <form class="auth-form" action="/admin/change-email" method="post">
+      <label>
+        Новый email
+        <input class="text-input" type="email" name="admin_email" value="{esc(admin_email)}" autocomplete="email" required>
+      </label>
+      <label>
+        Текущий пароль
+        <input class="text-input" type="password" name="current_password" autocomplete="current-password" required>
+      </label>
+      <button class="btn secondary" type="submit">Сохранить email</button>
+    </form>
+  </section>
+  <section class="panel">
     <h2>Как это работает</h2>
-    <p>Регистрации пользователей нет. Есть один админский логин, а пароль хранится только в виде PBKDF2-хеша. Если база сервиса будет удалена или пересоздана, пароль вернется к значению из переменных окружения.</p>
+    <p>Регистрации пользователей нет. Есть один админский логин, а пароль хранится только в виде PBKDF2-хеша. Если база сервиса будет удалена или пересоздана, пароль и email вернутся к значениям из переменных окружения.</p>
   </section>
 </section>
 """
@@ -3641,6 +3839,13 @@ class AppHandler(BaseHTTPRequestHandler):
             next_url = parse_qs(parsed.query).get("next", ["/"])[0] or "/"
             self.send_html(render_login(next_url=next_url))
             return
+        if path == "/forgot-password":
+            self.send_html(render_forgot_password())
+            return
+        if path == "/reset-password":
+            token = parse_qs(parsed.query).get("token", [""])[0]
+            self.send_html(render_reset_password(token))
+            return
         if path == "/logout":
             log_action("logout", username=self.current_user(), ip=self.client_ip())
             self.send_response(HTTPStatus.SEE_OTHER)
@@ -3727,6 +3932,12 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/login":
             self.handle_login()
             return
+        if parsed.path == "/forgot-password":
+            self.handle_forgot_password()
+            return
+        if parsed.path == "/reset-password":
+            self.handle_reset_password()
+            return
         if parsed.path not in PUBLIC_POST_PATHS and not self.require_auth(parsed.path):
             return
         if parsed.path == "/process":
@@ -3737,6 +3948,9 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/admin/change-password":
             self.handle_change_password()
+            return
+        if parsed.path == "/admin/change-email":
+            self.handle_change_email()
             return
         if parsed.path.startswith("/finalize/"):
             run_id = safe_filename(unquote(parsed.path.removeprefix("/finalize/")), "run")
@@ -3764,6 +3978,44 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         log_action("login_failed", username=username, ip=self.client_ip())
         self.send_html(render_login("Неверный логин или пароль.", next_url=next_url), HTTPStatus.UNAUTHORIZED)
+
+    def handle_forgot_password(self) -> None:
+        form = parse_form_urlencoded(self)
+        requested_email = clean_text(form.get("email", [""])[0]).lower()
+        configured_email = stored_admin_email().lower()
+        generic_message = "Если email совпадает с администраторским, ссылка для сброса пароля будет отправлена."
+        if requested_email and hmac.compare_digest(requested_email, configured_email):
+            token = create_password_reset_token(configured_email, self.client_ip())
+            reset_url = absolute_url(f"/reset-password?token={quote(token)}", self)
+            sent, error = send_password_reset_email(configured_email, reset_url)
+            details = {"email": configured_email, "sent": sent}
+            if not sent:
+                details["smtp_error"] = error
+                details["reset_url"] = reset_url
+            log_action("password_reset_requested", username=ADMIN_USERNAME, object_type="admin", ip=self.client_ip(), details=details)
+        else:
+            log_action("password_reset_requested_unknown_email", object_type="admin", ip=self.client_ip(), details={"email": requested_email})
+        self.send_html(render_forgot_password(message=generic_message))
+
+    def handle_reset_password(self) -> None:
+        form = parse_form_urlencoded(self)
+        token = form.get("token", [""])[0]
+        new_password = form.get("new_password", [""])[0]
+        confirm_password = form.get("confirm_password", [""])[0]
+        row = load_password_reset_token(token)
+        if not row:
+            self.send_html(render_reset_password(token, error="Ссылка недействительна или срок действия истек."), HTTPStatus.BAD_REQUEST)
+            return
+        if len(new_password) < 8:
+            self.send_html(render_reset_password(token, error="Новый пароль должен быть не короче 8 символов."), HTTPStatus.BAD_REQUEST)
+            return
+        if new_password != confirm_password:
+            self.send_html(render_reset_password(token, error="Новый пароль и повтор не совпадают."), HTTPStatus.BAD_REQUEST)
+            return
+        set_stored_admin_password_hash(password_hash(new_password))
+        mark_password_reset_token_used(token)
+        log_action("password_reset_completed", username=ADMIN_USERNAME, object_type="admin", ip=self.client_ip(), details={"email": row["email"]})
+        self.send_html(render_login(message="Пароль изменен. Войдите с новым паролем."))
 
     def handle_import_purchases(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
@@ -3814,6 +4066,20 @@ class AppHandler(BaseHTTPRequestHandler):
         set_stored_admin_password_hash(password_hash(new_password))
         log_action("password_changed", username=self.current_user(), object_type="admin", ip=self.client_ip())
         self.send_html(render_security(message="Пароль администратора изменен. При следующем входе используйте новый пароль."))
+
+    def handle_change_email(self) -> None:
+        form = parse_form_urlencoded(self)
+        email = clean_text(form.get("admin_email", [""])[0])
+        current_password = form.get("current_password", [""])[0]
+        if not verify_password(current_password):
+            self.send_html(render_security(error="Текущий пароль указан неверно."), HTTPStatus.BAD_REQUEST)
+            return
+        if "@" not in email or "." not in email.split("@")[-1]:
+            self.send_html(render_security(error="Укажите корректный email."), HTTPStatus.BAD_REQUEST)
+            return
+        set_stored_admin_email(email)
+        log_action("admin_email_changed", username=self.current_user(), object_type="admin", ip=self.client_ip(), details={"email": email})
+        self.send_html(render_security(message="Email для восстановления сохранен."))
 
     def handle_process(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)

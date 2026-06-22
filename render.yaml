@@ -19,7 +19,21 @@ services:
         value: "20"
       - key: ADMIN_USERNAME
         value: admin
+      - key: ADMIN_EMAIL
+        value: Merenov.kirill@mail.ru
       - key: ADMIN_PASSWORD_HASH
         sync: false
       - key: SESSION_SECRET
         sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "1"

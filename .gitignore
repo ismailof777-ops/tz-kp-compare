@@ -8,6 +8,9 @@ Gmail.zip
 *.jpg
 *.jpeg
 *.png
+!frontend/public/
+!frontend/public/brand/
+!frontend/public/brand/*.png
 
 .env
 .venv/

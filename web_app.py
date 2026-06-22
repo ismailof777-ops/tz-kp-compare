@@ -116,9 +116,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .site-header {
-  width: min(1200px, calc(100% - 40px));
+  width: min(1440px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 22px 0 0;
+  padding: 24px 0 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -127,24 +127,32 @@ body {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   color: var(--text);
-  font-weight: 800;
+  font-weight: 650;
   text-decoration: none;
 }
 .brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), #164e63);
-  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.18);
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .header-links {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   color: var(--muted);
   font-size: 14px;
+  font-weight: 450;
 }
 .header-links a {
   color: var(--muted);
@@ -159,8 +167,8 @@ body {
   padding: 44px 0 44px;
 }
 .shell.is-wide {
-  width: min(1760px, calc(100% - 24px));
-  padding-top: 24px;
+  width: min(1440px, calc(100% - 48px));
+  padding-top: 34px;
 }
 .topbar {
   display: flex;
@@ -171,9 +179,10 @@ body {
 }
 h1 {
   margin: 0;
-  font-size: 42px;
+  font-size: 40px;
   line-height: 1.12;
   letter-spacing: 0;
+  font-weight: 600;
 }
 .subtitle {
   margin: 14px 0 0;
@@ -725,36 +734,36 @@ a:hover {
 .btn.stop:hover { background: #fff0f0; }
 .review-summary {
   display: grid;
-  grid-template-columns: repeat(7, minmax(112px, 1fr));
-  gap: 12px;
-  margin: 4px 0 18px;
+  grid-template-columns: repeat(7, minmax(104px, 1fr));
+  gap: 10px;
+  margin: 4px 0 16px;
 }
 .summary-item {
   display: grid;
-  gap: 8px;
-  min-height: 86px;
+  gap: 7px;
+  min-height: 78px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 16px;
   background: #fff;
-  padding: 14px;
+  padding: 13px 14px;
   color: var(--muted);
   font-size: 13px;
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.035);
 }
 .summary-item b {
   color: var(--text);
-  font-size: 24px;
+  font-size: 23px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .summary-item.attention {
-  border-color: #fde68a;
-  background: #fffbeb;
+  border-color: #f7d985;
+  background: #fffaf0;
 }
 .summary-item.primary {
-  border-color: #99f6e4;
-  background: #f0fdfa;
+  border-color: rgba(37, 99, 235, 0.22);
+  background: #eff6ff;
 }
 .notice {
   border-radius: 16px;
@@ -813,21 +822,19 @@ a:hover {
 }
 .cookie-banner {
   position: fixed;
-  left: 16px;
-  right: 16px;
+  left: 18px;
   bottom: 16px;
   z-index: 50;
   display: none;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  max-width: 920px;
-  margin: 0 auto;
+  width: min(420px, calc(100% - 36px));
   padding: 13px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 16px;
   background: #fff;
-  box-shadow: 0 16px 36px rgba(16, 24, 40, 0.14);
+  box-shadow: 0 18px 42px rgba(16, 24, 40, 0.14);
 }
 .cookie-banner.is-visible {
   display: flex;
@@ -850,21 +857,22 @@ a:hover {
 }
 .cookie-actions .btn {
   min-height: 34px;
-  padding: 0 11px;
+  padding: 0 14px;
   font-size: 13px;
+  border-radius: 12px;
 }
 .table-wrap {
   width: 100%;
   max-width: 100%;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 18px;
   background: #fff;
-  box-shadow: var(--shadow);
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.05);
 }
 .review-page .table-wrap {
-  max-height: calc(100vh - 330px);
-  min-height: 58vh;
+  max-height: min(62vh, 620px);
+  min-height: 360px;
 }
 .review-form {
   display: grid;
@@ -874,10 +882,10 @@ a:hover {
 .review-card {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: 20px;
   background: #fff;
-  padding: 20px;
-  box-shadow: var(--shadow);
+  padding: 18px;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.055);
 }
 .review-card-head {
   display: flex;
@@ -888,8 +896,9 @@ a:hover {
 }
 .review-card-head h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1.2;
+  font-weight: 600;
 }
 .review-card-head p {
   margin: 6px 0 0;
@@ -903,34 +912,53 @@ a:hover {
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
-  border: 1px solid #99f6e4;
+  border: 1px solid rgba(37, 99, 235, 0.18);
   border-radius: 999px;
-  background: #f0fdfa;
-  color: var(--accent-strong);
+  background: #eff6ff;
+  color: #1d4ed8;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
 }
 .review-actionbar {
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 18px;
   background: #fff;
-  padding: 16px;
-  box-shadow: var(--shadow);
+  padding: 16px 20px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
 }
 .review-page .review-actionbar {
-  position: sticky;
-  bottom: 12px;
+  position: static;
   z-index: 20;
+}
+.review-page .btn {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 650;
+}
+.review-page .btn:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+.review-page .btn.secondary {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: #fff;
+  color: #1d4ed8;
+}
+.review-page .btn.secondary:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 .review-actionbar .actions {
   margin-top: 0;
   justify-content: flex-end;
   flex-wrap: nowrap;
+  flex: 0 0 auto;
 }
 .action-copy {
   color: var(--muted);
@@ -974,15 +1002,15 @@ a:hover {
 table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 1680px;
+  min-width: 1420px;
   font-size: 13px;
 }
 .review-page table {
-  min-width: 1780px;
+  min-width: 1480px;
 }
 th, td {
   border-bottom: 1px solid var(--line);
-  padding: 14px 12px;
+  padding: 13px 12px;
   text-align: left;
   vertical-align: top;
 }
@@ -993,7 +1021,7 @@ th {
   z-index: 1;
   font-size: 12px;
   color: #475569;
-  font-weight: 800;
+  font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0;
 }
@@ -1006,17 +1034,17 @@ td.small, th.small { width: 118px; }
   position: sticky;
   left: 0;
   z-index: 2;
-  width: 118px;
-  min-width: 118px;
+  width: 104px;
+  min-width: 104px;
   background: #fff;
 }
 .review-table th:nth-child(2),
 .review-table td:nth-child(2) {
   position: sticky;
-  left: 118px;
+  left: 104px;
   z-index: 2;
-  width: 620px;
-  min-width: 620px;
+  width: 500px;
+  min-width: 500px;
   background: #fff;
   box-shadow: 10px 0 18px rgba(15, 23, 42, 0.05);
 }
@@ -1030,7 +1058,7 @@ td.small, th.small { width: 118px; }
   font-size: 14px;
 }
 .review-table .compact-input {
-  width: 96px;
+  width: 90px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px 10px;
@@ -1047,7 +1075,7 @@ td.small, th.small { width: 118px; }
   white-space: nowrap;
 }
 .review-table .note-input {
-  width: 220px;
+  width: 180px;
   min-height: 74px;
   resize: vertical;
   border: 1px solid var(--line);
@@ -1073,11 +1101,11 @@ td.small, th.small { width: 118px; }
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 7px 10px;
+  border-radius: 7px;
+  padding: 7px 9px;
   font-size: 11px;
   line-height: 1.2;
-  font-weight: 800;
+  font-weight: 650;
   text-align: center;
   white-space: nowrap;
 }
@@ -1403,30 +1431,36 @@ td.small, th.small { width: 118px; }
 }
 .summary-help {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0 0 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 16px;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 .summary-help div {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 15px;
   background: #fff;
-  padding: 14px;
-  box-shadow: var(--shadow-soft);
+  padding: 13px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.035);
 }
 .summary-help b {
+  display: block;
+  margin-bottom: 2px;
   color: var(--text);
-  font-weight: 700;
+  font-weight: 650;
 }
 @media (max-width: 1180px) {
   .review-summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+  .summary-help {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .review-actionbar {
     grid-template-columns: 1fr;
+    display: grid;
   }
   .review-actionbar .actions {
     justify-content: flex-start;
@@ -2141,8 +2175,8 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
 <body>
   <header class="site-header">
     <a class="brand" href="/">
-      <span class="brand-mark" aria-hidden="true"></span>
-      <span>Сравнение КП</span>
+      <span class="brand-mark" aria-hidden="true"><img src="/brand/logo-mark.png" alt=""></span>
+      <span>Approve Moscow</span>
     </a>
     <nav class="header-links" aria-label="Навигация">
       <a href="/">Сервис</a>
@@ -2159,12 +2193,11 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
   </footer>
   <div class="cookie-banner" data-cookie-banner role="region" aria-label="Уведомление о cookies">
     <div class="cookie-text">
-      <b>Cookies и технические данные</b>
-      <span>Сервис использует только необходимые технические данные для работы сайта. Аналитика и рекламные cookies не подключены.</span>
+      <b>Технические cookies</b>
+      <span>Используются только для входа и корректной работы сервиса. Рекламная аналитика не подключена.</span>
       <a href="/privacy">Подробнее</a>
     </div>
     <div class="cookie-actions">
-      <button class="btn secondary" type="button" data-cookie-choice="necessary">Только необходимые</button>
       <button class="btn" type="button" data-cookie-choice="accepted">Понятно</button>
     </div>
   </div>
@@ -2647,6 +2680,89 @@ def stats_for(request_items: list[RequestItem], matches: list[Match]) -> dict[st
         "review": sum(1 for match in comparable if match.status == "review" and match.request_pos),
         "unmatched": sum(1 for match in comparable if not match.request_pos),
         "matched": matched,
+    }
+
+
+def review_payload(run_id: str) -> dict:
+    run_dir = RUNS_DIR / run_id
+    if not (run_dir / "state.json").exists():
+        raise FileNotFoundError(run_id)
+    request_items, matches, errors = load_state(run_dir)
+    stats = stats_for(request_items, matches)
+    match_percent = round((stats["matched"] / stats["comparable"]) * 100, 1) if stats["comparable"] else 0
+    history_hints = history_hints_for_request_items(request_items)
+    review_rows = [
+        (idx, match)
+        for idx, match in enumerate(matches)
+        if match.status != "service" and (match.status != "auto" or not match.request_pos or match.reason)
+    ]
+    request_options = [
+        {
+            "pos": item.pos,
+            "name": item.name,
+            "label": f"{item.pos} - {item.name}",
+            "unit": request_display_unit(item),
+            "qty": item.qty,
+        }
+        for item in request_items
+    ]
+    rows = []
+    for idx, match in review_rows:
+        selected_item = next((item for item in request_items if item.pos == match.request_pos), None)
+        status_class = "unmatched" if not match.request_pos else match.status
+        if status_class not in {"auto", "review", "unmatched", "manual", "service"}:
+            status_class = "review"
+        suggestions = []
+        for suggestion, score in top_request_suggestions(match, request_items):
+            suggestions.append(
+                {
+                    "pos": suggestion.pos,
+                    "name": suggestion.name,
+                    "label": f"{suggestion.pos} - {suggestion.name}",
+                    "unit": request_display_unit(suggestion),
+                    "score": round(score * 100),
+                }
+            )
+        history_hint = ""
+        if selected_item:
+            history_hint = history_hint_html(selected_item.pos, history_hints)
+        rows.append(
+            {
+                "idx": idx,
+                "status": match.status,
+                "status_label": status_label(match.status),
+                "status_class": status_class,
+                "request_pos": selected_item.pos if selected_item else "",
+                "request_label": f"{selected_item.pos} - {selected_item.name}" if selected_item else "",
+                "request_unit": request_display_unit(selected_item) if selected_item else "",
+                "supplier": match.supplier_item.supplier,
+                "row_no": match.supplier_item.row_no,
+                "name": match.supplier_item.name,
+                "qty": match.supplier_item.qty,
+                "unit": match.supplier_item.unit,
+                "price": match.supplier_item.price,
+                "total": match.supplier_item.total,
+                "override_qty": match.supplier_item.override_qty,
+                "override_unit": match.supplier_item.override_unit,
+                "reason": match.reason or "проверить совпадение",
+                "note": match.note,
+                "suggestions": suggestions,
+                "history_hint": history_hint,
+            }
+        )
+    suppliers = sorted({match.supplier_item.supplier for match in matches if match.supplier_item.supplier})
+    return {
+        "run_id": run_id,
+        "stats": stats,
+        "match_percent": match_percent,
+        "suppliers": suppliers,
+        "errors": errors,
+        "request_options": request_options,
+        "rows": rows,
+        "download": {
+            "summary": f"/download/{run_id}/summary.xlsx",
+            "review": f"/download/{run_id}/review.xlsx",
+        },
     }
 
 
@@ -3146,6 +3262,154 @@ def load_json_list(value: str) -> list:
         return data if isinstance(data, list) else []
     except Exception:
         return []
+
+
+def admin_history_payload(query: dict[str, list[str]] | None = None) -> dict:
+    query = query or {}
+    status_filter = clean_text(query.get("status", [""])[0])
+    supplier_filter = clean_text(query.get("supplier", [""])[0])
+    date_from = clean_text(query.get("date_from", [""])[0])
+    date_to = clean_text(query.get("date_to", [""])[0])
+    percent_min_raw = clean_text(query.get("percent_min", [""])[0])
+    percent_min = parse_number(percent_min_raw)
+    where = []
+    params: list[object] = []
+    if status_filter:
+        where.append("status = ?")
+        params.append(status_filter)
+    if supplier_filter:
+        where.append("suppliers_json LIKE ?")
+        params.append(f"%{supplier_filter}%")
+    if date_from:
+        where.append("created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        where.append("created_at <= ?")
+        params.append(date_to + "T23:59:59Z")
+    if percent_min is not None:
+        where.append("match_percent >= ?")
+        params.append(percent_min)
+    sql = "SELECT * FROM runs"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC LIMIT 200"
+    with db_connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        total_runs = conn.execute("SELECT COUNT(*) AS c FROM runs").fetchone()["c"]
+        imported_rows = conn.execute("SELECT COUNT(*) AS c FROM purchase_history").fetchone()["c"]
+        learned_rows = conn.execute("SELECT COUNT(*) AS c FROM learning_matches").fetchone()["c"]
+        done_rows = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE status = 'done'").fetchone()["c"]
+    items = []
+    for row in rows:
+        request_files = [str(item) for item in load_json_list(row["request_files_json"])]
+        offer_files = [str(item) for item in load_json_list(row["offer_files_json"])]
+        suppliers = [str(item) for item in load_json_list(row["suppliers_json"])]
+        errors = [str(item) for item in load_json_list(row["errors_json"])]
+        items.append(
+            {
+                "run_id": row["run_id"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "status": row["status"],
+                "request_files": request_files,
+                "offer_files": offer_files,
+                "suppliers": suppliers,
+                "request_count": row["request_count"],
+                "offer_count": row["offer_count"],
+                "comparable_count": row["comparable_count"],
+                "matched_count": row["matched_count"],
+                "review_count": row["review_count"],
+                "unmatched_count": row["unmatched_count"],
+                "match_percent": row["match_percent"],
+                "summary_path": row["summary_path"],
+                "review_path": row["review_path"],
+                "errors": errors,
+            }
+        )
+    return {
+        "filters": {
+            "status": status_filter,
+            "supplier": supplier_filter,
+            "date_from": date_from,
+            "date_to": date_to,
+            "percent_min": percent_min_raw,
+        },
+        "stats": {
+            "total_runs": total_runs,
+            "done_runs": done_rows,
+            "purchase_rows": imported_rows,
+            "learning_rows": learned_rows,
+        },
+        "runs": items,
+    }
+
+
+def admin_purchases_payload() -> dict:
+    with db_connect() as conn:
+        count = conn.execute("SELECT COUNT(*) AS c FROM purchase_history").fetchone()["c"]
+        rows = conn.execute(
+            """
+            SELECT imported_at, source_file, position_name, supplier, supplier_inn, price, purchase_date, unit, qty, total
+            FROM purchase_history
+            ORDER BY imported_at DESC, id DESC
+            LIMIT 300
+            """
+        ).fetchall()
+    return {
+        "count": count,
+        "rows": [
+            {
+                "imported_at": row["imported_at"],
+                "source_file": row["source_file"],
+                "position_name": row["position_name"],
+                "supplier": row["supplier"],
+                "supplier_inn": row["supplier_inn"],
+                "price": row["price"],
+                "price_text": format_money(row["price"]),
+                "purchase_date": row["purchase_date"],
+                "unit": row["unit"],
+                "qty": row["qty"],
+                "total": row["total"],
+                "total_text": format_money(row["total"]),
+            }
+            for row in rows
+        ],
+    }
+
+
+def admin_audit_payload() -> dict:
+    with db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT created_at, username, action, object_type, object_id, ip, details_json
+            FROM audit_log
+            ORDER BY id DESC
+            LIMIT 300
+            """
+        ).fetchall()
+    return {
+        "rows": [
+            {
+                "created_at": row["created_at"],
+                "username": row["username"],
+                "action": row["action"],
+                "object_type": row["object_type"],
+                "object_id": row["object_id"],
+                "ip": row["ip"],
+                "details_json": row["details_json"],
+            }
+            for row in rows
+        ]
+    }
+
+
+def admin_security_payload() -> dict:
+    source = "из админки" if stored_admin_password_hash() else "из переменных окружения"
+    return {
+        "admin_username": ADMIN_USERNAME,
+        "admin_email": stored_admin_email(),
+        "password_source": source,
+    }
 
 
 def render_admin(query: dict[str, list[str]] | None = None) -> bytes:
@@ -3836,9 +4100,12 @@ class AppHandler(BaseHTTPRequestHandler):
         return True
 
     def serve_react_asset(self, path: str, send_body: bool = True) -> None:
-        assets_root = (REACT_DIST / "assets").resolve()
+        allowed_roots = (
+            (REACT_DIST / "assets").resolve(),
+            (REACT_DIST / "brand").resolve(),
+        )
         asset_path = (REACT_DIST / path.lstrip("/")).resolve()
-        if assets_root not in asset_path.parents or not asset_path.exists() or not asset_path.is_file():
+        if not any(root in asset_path.parents for root in allowed_roots) or not asset_path.exists() or not asset_path.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
@@ -3868,7 +4135,7 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
-        if path.startswith("/assets/"):
+        if path.startswith(("/assets/", "/brand/")):
             self.serve_react_asset(path)
             return
         if path == "/login":
@@ -3881,6 +4148,33 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/reset-password":
             token = parse_qs(parsed.query).get("token", [""])[0]
             self.send_react_app(render_reset_password(token))
+            return
+        if path.startswith("/api/admin/"):
+            if not self.require_auth(path):
+                return
+            query = parse_qs(parsed.query)
+            if path in {"/api/admin/history", "/api/admin/overview"}:
+                self.send_json(admin_history_payload(query))
+                return
+            if path == "/api/admin/purchases":
+                self.send_json(admin_purchases_payload())
+                return
+            if path == "/api/admin/audit":
+                self.send_json(admin_audit_payload())
+                return
+            if path == "/api/admin/security":
+                self.send_json(admin_security_payload())
+                return
+            self.send_json({"state": "error", "message": "Неизвестный API-адрес."}, HTTPStatus.NOT_FOUND)
+            return
+        if path.startswith("/api/review/"):
+            if not self.require_auth(path):
+                return
+            run_id = safe_filename(unquote(path.removeprefix("/api/review/")), "run")
+            try:
+                self.send_json(review_payload(run_id))
+            except FileNotFoundError:
+                self.send_json({"state": "error", "message": "Обработка не найдена. Загрузите файлы заново."}, HTTPStatus.NOT_FOUND)
             return
         if path == "/logout":
             log_action("logout", username=self.current_user(), ip=self.client_ip())
@@ -3895,27 +4189,27 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_react_app(render_home())
             return
         if path == "/privacy":
-            self.send_html(render_privacy())
+            self.send_react_app(render_privacy())
             return
         if path in {"/admin", "/admin/history"}:
             if not self.require_auth(path):
                 return
-            self.send_html(render_admin(parse_qs(parsed.query)))
+            self.send_react_app(render_admin(parse_qs(parsed.query)))
             return
         if path == "/admin/purchases":
             if not self.require_auth(path):
                 return
-            self.send_html(render_purchases())
+            self.send_react_app(render_purchases())
             return
         if path == "/admin/audit":
             if not self.require_auth(path):
                 return
-            self.send_html(render_audit())
+            self.send_react_app(render_audit())
             return
         if path == "/admin/security":
             if not self.require_auth(path):
                 return
-            self.send_html(render_security())
+            self.send_react_app(render_security())
             return
         if path not in PUBLIC_GET_PATHS and not self.require_auth(path):
             return
@@ -3939,7 +4233,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if not (run_dir / "state.json").exists():
                 self.send_html(render_home("Обработка не найдена. Загрузите файлы заново."), HTTPStatus.NOT_FOUND)
                 return
-            self.send_html(render_review(run_id))
+            self.send_react_app(render_review(run_id))
             return
         if path.startswith("/done/"):
             run_id = safe_filename(unquote(path.removeprefix("/done/")), "run")
@@ -3956,7 +4250,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path.startswith("/assets/"):
+        if parsed.path.startswith(("/assets/", "/brand/")):
             self.serve_react_asset(parsed.path, send_body=False)
             return
         if parsed.path not in PUBLIC_GET_PATHS and not self.require_auth(parsed.path):
@@ -4016,14 +4310,17 @@ class AppHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         log_action("login_failed", username=username, ip=self.client_ip())
-        self.send_html(render_login("Неверный логин или пароль.", next_url=next_url), HTTPStatus.UNAUTHORIZED)
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", f"/login?error=invalid&next={quote(next_url, safe='')}")
+        self.end_headers()
 
     def handle_forgot_password(self) -> None:
         form = parse_form_urlencoded(self)
         requested_email = clean_text(form.get("email", [""])[0]).lower()
         configured_email = stored_admin_email().lower()
         generic_message = "Если email совпадает с администраторским, ссылка для сброса пароля будет отправлена."
-        if requested_email and hmac.compare_digest(requested_email, configured_email):
+        matched = bool(requested_email and hmac.compare_digest(requested_email, configured_email))
+        if matched:
             token = create_password_reset_token(configured_email, self.client_ip())
             reset_url = absolute_url(f"/reset-password?token={quote(token)}", self)
             sent, error = send_password_reset_email(configured_email, reset_url)
@@ -4034,6 +4331,13 @@ class AppHandler(BaseHTTPRequestHandler):
             log_action("password_reset_requested", username=ADMIN_USERNAME, object_type="admin", ip=self.client_ip(), details=details)
         else:
             log_action("password_reset_requested_unknown_email", object_type="admin", ip=self.client_ip(), details={"email": requested_email})
+        if self.wants_json():
+            self.send_json({
+                "ok": True,
+                "matched": matched,
+                "message": "Ссылка для сброса отправлена." if matched else "Email не совпадает с администраторским.",
+            })
+            return
         self.send_html(render_forgot_password(message=generic_message))
 
     def handle_reset_password(self) -> None:
@@ -4054,17 +4358,25 @@ class AppHandler(BaseHTTPRequestHandler):
         set_stored_admin_password_hash(password_hash(new_password))
         mark_password_reset_token_used(token)
         log_action("password_reset_completed", username=ADMIN_USERNAME, object_type="admin", ip=self.client_ip(), details={"email": row["email"]})
-        self.send_html(render_login(message="Пароль изменен. Войдите с новым паролем."))
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", "/login?message=password_changed")
+        self.end_headers()
 
     def handle_import_purchases(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_UPLOAD_SIZE:
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Файл слишком большой."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                return
             self.send_html(render_purchases("Файл слишком большой."), HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
         body = self.rfile.read(length)
         uploads = parse_multipart_upload(self.headers, body)
         files = [field for field in uploads.get("purchase_base", []) if field.filename]
         if not files:
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Выберите Excel-файл базы закупок."}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_purchases("Выберите Excel-файл базы закупок."), HTTPStatus.BAD_REQUEST)
             return
         try:
@@ -4076,6 +4388,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 ip=self.client_ip(),
                 details={"filename": files[0].filename, "rows": imported, "warnings": warnings},
             )
+            if self.wants_json():
+                self.send_json({"ok": True, "message": f"Импортировано строк: {imported}.", "warnings": warnings})
+                return
             self.send_html(render_purchases(f"Импортировано строк: {imported}.", warnings))
         except Exception as exc:  # noqa: BLE001
             log_action(
@@ -4085,6 +4400,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 ip=self.client_ip(),
                 details={"filename": files[0].filename, "error": str(exc)},
             )
+            if self.wants_json():
+                self.send_json({"ok": False, "message": f"Не удалось импортировать файл: {exc}"}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_purchases(f"Не удалось импортировать файл: {exc}"), HTTPStatus.BAD_REQUEST)
 
     def handle_change_password(self) -> None:
@@ -4094,16 +4412,28 @@ class AppHandler(BaseHTTPRequestHandler):
         confirm_password = form.get("confirm_password", [""])[0]
         if not verify_password(current_password):
             log_action("password_change_failed", username=self.current_user(), object_type="admin", ip=self.client_ip(), details={"reason": "wrong_current_password"})
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Текущий пароль указан неверно."}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_security(error="Текущий пароль указан неверно."), HTTPStatus.BAD_REQUEST)
             return
         if len(new_password) < 8:
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Новый пароль должен быть не короче 8 символов."}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_security(error="Новый пароль должен быть не короче 8 символов."), HTTPStatus.BAD_REQUEST)
             return
         if new_password != confirm_password:
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Новый пароль и повтор не совпадают."}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_security(error="Новый пароль и повтор не совпадают."), HTTPStatus.BAD_REQUEST)
             return
         set_stored_admin_password_hash(password_hash(new_password))
         log_action("password_changed", username=self.current_user(), object_type="admin", ip=self.client_ip())
+        if self.wants_json():
+            self.send_json({"ok": True, "message": "Пароль администратора изменен."})
+            return
         self.send_html(render_security(message="Пароль администратора изменен. При следующем входе используйте новый пароль."))
 
     def handle_change_email(self) -> None:
@@ -4111,13 +4441,22 @@ class AppHandler(BaseHTTPRequestHandler):
         email = clean_text(form.get("admin_email", [""])[0])
         current_password = form.get("current_password", [""])[0]
         if not verify_password(current_password):
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Текущий пароль указан неверно."}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_security(error="Текущий пароль указан неверно."), HTTPStatus.BAD_REQUEST)
             return
         if "@" not in email or "." not in email.split("@")[-1]:
+            if self.wants_json():
+                self.send_json({"ok": False, "message": "Укажите корректный email."}, HTTPStatus.BAD_REQUEST)
+                return
             self.send_html(render_security(error="Укажите корректный email."), HTTPStatus.BAD_REQUEST)
             return
         set_stored_admin_email(email)
         log_action("admin_email_changed", username=self.current_user(), object_type="admin", ip=self.client_ip(), details={"email": email})
+        if self.wants_json():
+            self.send_json({"ok": True, "message": "Email для восстановления сохранен.", "admin_email": email})
+            return
         self.send_html(render_security(message="Email для восстановления сохранен."))
 
     def handle_process(self) -> None:

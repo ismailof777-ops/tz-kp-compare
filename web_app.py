@@ -3218,7 +3218,7 @@ def render_admin(query: dict[str, list[str]] | None = None) -> bytes:
     <div class="metric-card"><span>Обработок в истории</span><b>{esc(total_runs)}</b></div>
     <div class="metric-card"><span>Строк базы закупок</span><b>{esc(imported_rows)}</b></div>
     <div class="metric-card"><span>Подтверждений в самообучении</span><b>{esc(learned_rows)}</b></div>
-    <div class="metric-card"><span>Новые отчеты</span><b>SQLite</b></div>
+    <div class="metric-card"><span>Новые отчеты</span><b>База сервиса</b></div>
   </div>
   <section class="panel">
     <form class="admin-filter" action="/admin" method="get">

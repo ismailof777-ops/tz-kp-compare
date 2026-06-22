@@ -1574,6 +1574,11 @@ def init_db() -> None:
                 ip TEXT NOT NULL DEFAULT '',
                 details_json TEXT NOT NULL DEFAULT '{}'
             );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
 
@@ -1610,10 +1615,10 @@ def password_hash(password: str, *, iterations: int = 260000) -> str:
     )
 
 
-def verify_password(password: str) -> bool:
-    if ADMIN_PASSWORD_HASH:
+def verify_password_hash(password: str, stored_hash: str) -> bool:
+    if stored_hash:
         try:
-            scheme, raw_iterations, raw_salt, raw_digest = ADMIN_PASSWORD_HASH.split("$", 3)
+            scheme, raw_iterations, raw_salt, raw_digest = stored_hash.split("$", 3)
             if scheme != "pbkdf2_sha256":
                 return False
             iterations = int(raw_iterations)
@@ -1623,6 +1628,36 @@ def verify_password(password: str) -> bool:
             return hmac.compare_digest(actual, expected)
         except Exception:
             return False
+    return False
+
+
+def stored_admin_password_hash() -> str:
+    try:
+        with db_connect() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = 'admin_password_hash'").fetchone()
+            return row["value"] if row else ""
+    except Exception:
+        return ""
+
+
+def set_stored_admin_password_hash(stored_hash: str) -> None:
+    with db_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings(key, value, updated_at)
+            VALUES ('admin_password_hash', ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (stored_hash, now_iso()),
+        )
+
+
+def verify_password(password: str) -> bool:
+    db_hash = stored_admin_password_hash()
+    if db_hash:
+        return verify_password_hash(password, db_hash)
+    if ADMIN_PASSWORD_HASH:
+        return verify_password_hash(password, ADMIN_PASSWORD_HASH)
     if ADMIN_PASSWORD:
         return hmac.compare_digest(password, ADMIN_PASSWORD)
     if ALLOW_DEV_ADMIN:
@@ -2914,6 +2949,7 @@ def admin_tabs(active: str) -> str:
         ("history", "/admin/history", "История обработок"),
         ("purchases", "/admin/purchases", "База закупок"),
         ("audit", "/admin/audit", "Журнал действий"),
+        ("security", "/admin/security", "Доступ"),
     ]
     return '<nav class="admin-tabs" aria-label="Админка">' + "".join(
         f'<a class="{"is-active" if key == active else ""}" href="{href}">{label}</a>'
@@ -3140,6 +3176,49 @@ def render_audit() -> bytes:
 </section>
 """
     return page("Журнал действий", body, wide=True)
+
+
+def render_security(message: str = "", error: str = "") -> bytes:
+    message_html = f'<div class="notice">{esc(message)}</div>' if message else ""
+    error_html = f'<div class="notice error">{esc(error)}</div>' if error else ""
+    source = "из админки" if stored_admin_password_hash() else "из переменных окружения"
+    body = f"""
+<div class="topbar">
+  <div>
+    <h1>Доступ</h1>
+    <p class="subtitle">Смена пароля администратора без регистрации пользователей. Логин остается заданным в переменной ADMIN_USERNAME.</p>
+  </div>
+</div>
+<section class="admin-layout">
+  {admin_tabs("security")}
+  {message_html}
+  {error_html}
+  <section class="panel">
+    <h2>Сменить пароль</h2>
+    <p class="subtitle">Текущий источник пароля: {esc(source)}. После смены новый пароль будет сохранен в локальной базе сервиса.</p>
+    <form class="auth-form" action="/admin/change-password" method="post">
+      <label>
+        Текущий пароль
+        <input class="text-input" type="password" name="current_password" autocomplete="current-password" required>
+      </label>
+      <label>
+        Новый пароль
+        <input class="text-input" type="password" name="new_password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <label>
+        Повторите новый пароль
+        <input class="text-input" type="password" name="confirm_password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <button class="btn" type="submit">Сменить пароль</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Как это работает</h2>
+    <p>Регистрации пользователей нет. Есть один админский логин, а пароль хранится только в виде PBKDF2-хеша. Если база сервиса будет удалена или пересоздана, пароль вернется к значению из переменных окружения.</p>
+  </section>
+</section>
+"""
+    return page("Доступ", body, wide=True)
 
 
 def normalize_column_name(value: object) -> str:
@@ -3592,6 +3671,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_html(render_audit())
             return
+        if path == "/admin/security":
+            if not self.require_auth(path):
+                return
+            self.send_html(render_security())
+            return
         if path not in PUBLIC_GET_PATHS and not self.require_auth(path):
             return
         if path == "/template/request.xlsx":
@@ -3651,6 +3735,9 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/admin/import-purchases":
             self.handle_import_purchases()
             return
+        if parsed.path == "/admin/change-password":
+            self.handle_change_password()
+            return
         if parsed.path.startswith("/finalize/"):
             run_id = safe_filename(unquote(parsed.path.removeprefix("/finalize/")), "run")
             self.handle_finalize(run_id)
@@ -3708,6 +3795,25 @@ class AppHandler(BaseHTTPRequestHandler):
                 details={"filename": files[0].filename, "error": str(exc)},
             )
             self.send_html(render_purchases(f"Не удалось импортировать файл: {exc}"), HTTPStatus.BAD_REQUEST)
+
+    def handle_change_password(self) -> None:
+        form = parse_form_urlencoded(self)
+        current_password = form.get("current_password", [""])[0]
+        new_password = form.get("new_password", [""])[0]
+        confirm_password = form.get("confirm_password", [""])[0]
+        if not verify_password(current_password):
+            log_action("password_change_failed", username=self.current_user(), object_type="admin", ip=self.client_ip(), details={"reason": "wrong_current_password"})
+            self.send_html(render_security(error="Текущий пароль указан неверно."), HTTPStatus.BAD_REQUEST)
+            return
+        if len(new_password) < 8:
+            self.send_html(render_security(error="Новый пароль должен быть не короче 8 символов."), HTTPStatus.BAD_REQUEST)
+            return
+        if new_password != confirm_password:
+            self.send_html(render_security(error="Новый пароль и повтор не совпадают."), HTTPStatus.BAD_REQUEST)
+            return
+        set_stored_admin_password_hash(password_hash(new_password))
+        log_action("password_changed", username=self.current_user(), object_type="admin", ip=self.client_ip())
+        self.send_html(render_security(message="Пароль администратора изменен. При следующем входе используйте новый пароль."))
 
     def handle_process(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)

@@ -1,23 +1,31 @@
 from __future__ import annotations
 
+import base64
+from datetime import datetime
 from email.parser import BytesParser
 from email.policy import default as email_policy
+import hashlib
 import html
+import hmac
 import io
 import json
 import mimetypes
 import os
+import re
+import secrets
 import shutil
+import sqlite3
 import sys
 import threading
 import uuid
 from dataclasses import asdict, replace
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -41,12 +49,24 @@ from compare_tz_kp import (
 
 
 ROOT = Path(__file__).resolve().parent
+OUTPUTS_DIR = ROOT / "outputs"
 RUNS_DIR = ROOT / "outputs" / "runs"
+APP_DB = ROOT / "outputs" / "app.db"
 MAX_UPLOAD_SIZE = 80 * 1024 * 1024
 AI_JOBS: dict[str, dict[str, object]] = {}
 AI_JOBS_LOCK = threading.Lock()
 RUN_LOCKS: dict[str, threading.Lock] = {}
 RUN_LOCKS_LOCK = threading.Lock()
+SESSION_COOKIE = "tz_kp_session"
+SESSION_TTL_SECONDS = 60 * 60 * 12
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
+ALLOW_DEV_ADMIN = os.environ.get("ALLOW_DEV_ADMIN", "") == "1"
+SESSION_SECRET_FALLBACK = secrets.token_urlsafe(32)
+PUBLIC_GET_PATHS = {"/login", "/privacy", "/favicon.ico", "/robots.txt"}
+PUBLIC_POST_PATHS = {"/login"}
 
 
 class UploadedFile:
@@ -1062,6 +1082,162 @@ td.small, th.small { width: 118px; }
 .status.auto { background: #e8f6ec; border-color: #bfe5c8; color: #236336; }
 .status.manual { background: #eef4fa; border-color: #cbdcea; color: #244f73; }
 .status.service { background: #f0f2f4; border-color: #d9e0ea; color: #667085; }
+.auth-shell {
+  width: min(440px, 100%);
+  margin: 32px auto;
+}
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+.auth-form label,
+.admin-filter label,
+.import-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.text-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  padding: 12px 13px;
+  outline: none;
+}
+.text-input:focus {
+  border-color: rgba(15, 118, 110, 0.55);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
+}
+.admin-layout {
+  display: grid;
+  gap: 18px;
+}
+.admin-tabs,
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.admin-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 700;
+}
+.admin-tabs a.is-active {
+  border-color: rgba(15, 118, 110, 0.32);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.admin-filter,
+.import-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.import-form {
+  grid-template-columns: minmax(260px, 1fr) auto;
+}
+.admin-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 980px;
+}
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 11px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.admin-table th {
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.admin-table td {
+  background: #fff;
+}
+.table-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.metric-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: var(--panel-soft);
+}
+.metric-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.metric-card b {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+}
+.history-hint {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 12px;
+}
+.history-hint b {
+  display: block;
+  margin-bottom: 4px;
+}
+.history-hint span {
+  display: block;
+  color: #31568f;
+}
+.history-panel {
+  display: grid;
+  gap: 12px;
+}
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+.history-list-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+}
+.history-list-item b {
+  display: block;
+  margin-bottom: 4px;
+}
+.audit-line {
+  color: var(--muted);
+  font-size: 12px;
+}
 .muted { color: var(--muted); }
 .danger { background: var(--red); }
 .empty {
@@ -1296,6 +1472,16 @@ td.small, th.small { width: 118px; }
   .review-badge {
     width: fit-content;
   }
+  .admin-filter,
+  .import-form,
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-actions .btn,
+  .admin-tabs a {
+    width: 100%;
+    justify-content: center;
+  }
   h1 { font-size: 30px; }
   .subtitle { font-size: 15px; }
   .btn { width: 100%; }
@@ -1306,6 +1492,439 @@ td.small, th.small { width: 118px; }
 
 def esc(value) -> str:
     return html.escape("" if value is None else str(value), quote=True)
+
+
+def now_iso() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def json_dumps(data: object) -> str:
+    return json.dumps(data, ensure_ascii=False, default=str)
+
+
+def db_connect() -> sqlite3.Connection:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(APP_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    with db_connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                request_files_json TEXT NOT NULL DEFAULT '[]',
+                offer_files_json TEXT NOT NULL DEFAULT '[]',
+                suppliers_json TEXT NOT NULL DEFAULT '[]',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                offer_count INTEGER NOT NULL DEFAULT 0,
+                comparable_count INTEGER NOT NULL DEFAULT 0,
+                matched_count INTEGER NOT NULL DEFAULT 0,
+                review_count INTEGER NOT NULL DEFAULT 0,
+                unmatched_count INTEGER NOT NULL DEFAULT 0,
+                match_percent REAL NOT NULL DEFAULT 0,
+                summary_path TEXT NOT NULL DEFAULT '',
+                review_path TEXT NOT NULL DEFAULT '',
+                errors_json TEXT NOT NULL DEFAULT '[]'
+            );
+            CREATE TABLE IF NOT EXISTS purchase_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_at TEXT NOT NULL,
+                source_file TEXT NOT NULL,
+                position_name TEXT NOT NULL,
+                supplier TEXT NOT NULL DEFAULT '',
+                supplier_inn TEXT NOT NULL DEFAULT '',
+                price REAL,
+                purchase_date TEXT NOT NULL DEFAULT '',
+                unit TEXT NOT NULL DEFAULT '',
+                qty REAL,
+                total REAL,
+                raw_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_purchase_history_position ON purchase_history(position_name);
+            CREATE INDEX IF NOT EXISTS idx_purchase_history_supplier ON purchase_history(supplier);
+            CREATE TABLE IF NOT EXISTS learning_matches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                request_name TEXT NOT NULL,
+                request_unit TEXT NOT NULL DEFAULT '',
+                supplier_item_name TEXT NOT NULL,
+                supplier TEXT NOT NULL DEFAULT '',
+                supplier_inn TEXT NOT NULL DEFAULT '',
+                request_pos TEXT NOT NULL DEFAULT '',
+                score REAL NOT NULL DEFAULT 0,
+                source_run_id TEXT NOT NULL DEFAULT '',
+                confirmed_count INTEGER NOT NULL DEFAULT 1,
+                last_used_at TEXT NOT NULL DEFAULT '',
+                UNIQUE(request_name, supplier_item_name, supplier)
+            );
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                username TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL,
+                object_type TEXT NOT NULL DEFAULT '',
+                object_id TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT '',
+                details_json TEXT NOT NULL DEFAULT '{}'
+            );
+            """
+        )
+
+
+def log_action(
+    action: str,
+    *,
+    username: str = "",
+    object_type: str = "",
+    object_id: str = "",
+    ip: str = "",
+    details: dict | None = None,
+) -> None:
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_log(created_at, username, action, object_type, object_id, ip, details_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (now_iso(), username, action, object_type, object_id, ip, json_dumps(details or {})),
+            )
+    except Exception:
+        pass
+
+
+def password_hash(password: str, *, iterations: int = 260000) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return "pbkdf2_sha256${}${}${}".format(
+        iterations,
+        base64.urlsafe_b64encode(salt).decode("ascii"),
+        base64.urlsafe_b64encode(digest).decode("ascii"),
+    )
+
+
+def verify_password(password: str) -> bool:
+    if ADMIN_PASSWORD_HASH:
+        try:
+            scheme, raw_iterations, raw_salt, raw_digest = ADMIN_PASSWORD_HASH.split("$", 3)
+            if scheme != "pbkdf2_sha256":
+                return False
+            iterations = int(raw_iterations)
+            salt = base64.urlsafe_b64decode(raw_salt.encode("ascii"))
+            expected = base64.urlsafe_b64decode(raw_digest.encode("ascii"))
+            actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+            return hmac.compare_digest(actual, expected)
+        except Exception:
+            return False
+    if ADMIN_PASSWORD:
+        return hmac.compare_digest(password, ADMIN_PASSWORD)
+    if ALLOW_DEV_ADMIN:
+        return hmac.compare_digest(password, "admin")
+    return False
+
+
+def session_secret() -> bytes:
+    raw = SESSION_SECRET or SESSION_SECRET_FALLBACK
+    return raw.encode("utf-8")
+
+
+def sign_session(username: str) -> str:
+    expires = int(datetime.utcnow().timestamp()) + SESSION_TTL_SECONDS
+    payload = base64.urlsafe_b64encode(f"{username}|{expires}".encode("utf-8")).decode("ascii")
+    signature = hmac.new(session_secret(), payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def verify_session(value: str) -> str:
+    try:
+        payload, signature = value.split(".", 1)
+        expected = hmac.new(session_secret(), payload.encode("ascii"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return ""
+        raw = base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
+        username, raw_expires = raw.rsplit("|", 1)
+        if int(raw_expires) < int(datetime.utcnow().timestamp()):
+            return ""
+        return username
+    except Exception:
+        return ""
+
+
+def parse_cookie_header(cookie_header: str) -> SimpleCookie:
+    cookie = SimpleCookie()
+    if cookie_header:
+        try:
+            cookie.load(cookie_header)
+        except Exception:
+            pass
+    return cookie
+
+
+def rough_words(text: str) -> set[str]:
+    words = set(re.findall(r"[0-9a-zа-яё]{3,}", clean_text(text).lower()))
+    return {word for word in words if word not in {"для", "или", "при", "под", "без", "что"}}
+
+
+def match_percent_for(request_items: list[RequestItem], matches: list[Match]) -> float:
+    stats = stats_for(request_items, matches)
+    return round((stats["matched"] / stats["comparable"]) * 100, 1) if stats["comparable"] else 0
+
+
+def record_run_metadata(
+    run_id: str,
+    *,
+    status: str,
+    request_files: list[str] | None = None,
+    offer_files: list[str] | None = None,
+    request_items: list[RequestItem] | None = None,
+    matches: list[Match] | None = None,
+    errors: list[str] | None = None,
+) -> None:
+    created_at = now_iso()
+    updated_at = created_at
+    suppliers: list[str] = []
+    stats = {"request": 0, "offers": 0, "comparable": 0, "matched": 0, "review": 0, "unmatched": 0}
+    if request_items is not None and matches is not None:
+        stats = stats_for(request_items, matches)
+        suppliers = sorted({match.supplier_item.supplier for match in matches if match.supplier_item.supplier})
+    match_percent = round((stats["matched"] / stats["comparable"]) * 100, 1) if stats["comparable"] else 0
+    try:
+        with db_connect() as conn:
+            existing = conn.execute(
+                "SELECT created_at, request_files_json, offer_files_json FROM runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if existing:
+                created_at = existing["created_at"]
+                if request_files is None:
+                    request_files = load_json_list(existing["request_files_json"])
+                if offer_files is None:
+                    offer_files = load_json_list(existing["offer_files_json"])
+            conn.execute(
+                """
+                INSERT INTO runs (
+                    run_id, created_at, updated_at, status, request_files_json, offer_files_json,
+                    suppliers_json, request_count, offer_count, comparable_count, matched_count,
+                    review_count, unmatched_count, match_percent, summary_path, review_path, errors_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    updated_at=excluded.updated_at,
+                    status=excluded.status,
+                    request_files_json=excluded.request_files_json,
+                    offer_files_json=excluded.offer_files_json,
+                    suppliers_json=excluded.suppliers_json,
+                    request_count=excluded.request_count,
+                    offer_count=excluded.offer_count,
+                    comparable_count=excluded.comparable_count,
+                    matched_count=excluded.matched_count,
+                    review_count=excluded.review_count,
+                    unmatched_count=excluded.unmatched_count,
+                    match_percent=excluded.match_percent,
+                    summary_path=excluded.summary_path,
+                    review_path=excluded.review_path,
+                    errors_json=excluded.errors_json
+                """,
+                (
+                    run_id,
+                    created_at,
+                    updated_at,
+                    status,
+                    json_dumps(request_files or []),
+                    json_dumps(offer_files or []),
+                    json_dumps(suppliers),
+                    stats["request"],
+                    stats["offers"],
+                    stats["comparable"],
+                    stats["matched"],
+                    stats["review"],
+                    stats["unmatched"],
+                    match_percent,
+                    f"outputs/runs/{run_id}/summary.xlsx",
+                    f"outputs/runs/{run_id}/review.xlsx",
+                    json_dumps(errors or []),
+                ),
+            )
+    except Exception:
+        pass
+
+
+def save_learning_matches(run_id: str, request_items: list[RequestItem], matches: list[Match]) -> int:
+    request_by_pos = {item.pos: item for item in request_items}
+    saved = 0
+    with db_connect() as conn:
+        for match in matches:
+            if match.status != "manual" or not match.request_pos:
+                continue
+            request = request_by_pos.get(match.request_pos)
+            if not request:
+                continue
+            now = now_iso()
+            conn.execute(
+                """
+                INSERT INTO learning_matches (
+                    created_at, updated_at, request_name, request_unit, supplier_item_name,
+                    supplier, supplier_inn, request_pos, score, source_run_id, confirmed_count, last_used_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 1, '')
+                ON CONFLICT(request_name, supplier_item_name, supplier) DO UPDATE SET
+                    updated_at=excluded.updated_at,
+                    request_unit=excluded.request_unit,
+                    request_pos=excluded.request_pos,
+                    score=max(learning_matches.score, excluded.score),
+                    source_run_id=excluded.source_run_id,
+                    confirmed_count=learning_matches.confirmed_count + 1
+                """,
+                (
+                    now,
+                    now,
+                    clean_text(request.name),
+                    request_display_unit(request),
+                    clean_text(match.supplier_item.name),
+                    clean_text(match.supplier_item.supplier),
+                    request.pos,
+                    float(match.score or 0),
+                    run_id,
+                ),
+            )
+            saved += 1
+    return saved
+
+
+def apply_learning_suggestions(request_items: list[RequestItem], matches: list[Match]) -> list[Match]:
+    try:
+        with db_connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, request_name, supplier_item_name, supplier, request_pos, confirmed_count, score
+                FROM learning_matches
+                ORDER BY confirmed_count DESC, updated_at DESC
+                LIMIT 5000
+                """
+            ).fetchall()
+    except Exception:
+        return matches
+    if not rows:
+        return matches
+    request_by_pos = {item.pos: item for item in request_items}
+    request_words = {item.pos: rough_words(item.name) for item in request_items}
+    updated: list[Match] = []
+    used_ids: set[int] = set()
+    for match in matches:
+        if match.status == "service":
+            updated.append(match)
+            continue
+        best: tuple[float, sqlite3.Row] | None = None
+        offer_words = rough_words(match.supplier_item.name)
+        for row in rows:
+            saved_offer_words = rough_words(row["supplier_item_name"])
+            if offer_words and saved_offer_words and not (offer_words & saved_offer_words):
+                continue
+            score_offer, _ = match_score(row["supplier_item_name"], match.supplier_item.name)
+            if score_offer < 0.62:
+                continue
+            request = request_by_pos.get(row["request_pos"])
+            if not request:
+                continue
+            if request_words.get(request.pos) and rough_words(row["request_name"]) and not (request_words[request.pos] & rough_words(row["request_name"])):
+                continue
+            score_request, _ = match_score(row["request_name"], request.name)
+            combined = (score_offer * 0.62) + (score_request * 0.38) + min(int(row["confirmed_count"]), 5) * 0.015
+            if best is None or combined > best[0]:
+                best = (combined, row)
+        if best and (not match.request_pos or match.status in {"unmatched", "review"} or best[0] > match.score + 0.1):
+            request_pos = best[1]["request_pos"]
+            status = "auto" if best[0] >= 0.92 and int(best[1]["confirmed_count"]) >= 2 else "review"
+            reason = f"подсказка самообучения: подтверждено {best[1]['confirmed_count']} раз(а)"
+            updated.append(Match(match.supplier_item, request_pos, min(best[0], 0.99), status, reason, match.note))
+            used_ids.add(int(best[1]["id"]))
+        else:
+            updated.append(match)
+    if used_ids:
+        try:
+            with db_connect() as conn:
+                conn.executemany(
+                    "UPDATE learning_matches SET last_used_at = ? WHERE id = ?",
+                    [(now_iso(), row_id) for row_id in used_ids],
+                )
+        except Exception:
+            pass
+    return updated
+
+
+def history_hints_for_request_items(request_items: list[RequestItem], limit: int = 3) -> dict[str, list[dict[str, object]]]:
+    try:
+        with db_connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT position_name, supplier, supplier_inn, price, purchase_date, unit, qty, total, source_file
+                FROM purchase_history
+                WHERE position_name <> ''
+                ORDER BY imported_at DESC
+                LIMIT 20000
+                """
+            ).fetchall()
+    except Exception:
+        return {}
+    if not rows:
+        return {}
+    row_words = [(row, rough_words(row["position_name"])) for row in rows]
+    hints: dict[str, list[dict[str, object]]] = {}
+    for request in request_items:
+        req_words = rough_words(request.name)
+        scored: list[tuple[float, sqlite3.Row]] = []
+        for row, words in row_words:
+            if req_words and words and not (req_words & words):
+                continue
+            score, _ = match_score(request.name, row["position_name"])
+            if score >= 0.45:
+                scored.append((score, row))
+        scored.sort(key=lambda pair: (-pair[0], pair[1]["price"] if pair[1]["price"] is not None else 10**18))
+        selected: list[dict[str, object]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for score, row in scored:
+            key = (row["supplier"], str(row["price"]), row["purchase_date"])
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(
+                {
+                    "score": round(score, 3),
+                    "position_name": row["position_name"],
+                    "supplier": row["supplier"],
+                    "supplier_inn": row["supplier_inn"],
+                    "price": row["price"],
+                    "purchase_date": row["purchase_date"],
+                    "unit": row["unit"],
+                    "qty": row["qty"],
+                    "total": row["total"],
+                    "source_file": row["source_file"],
+                }
+            )
+            if len(selected) >= limit:
+                break
+        if selected:
+            hints[request.pos] = selected
+    return hints
+
+
+def format_money(value: object) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:,.2f}".replace(",", " ") + " ₽"
+    return ""
+
+
+def parse_form_urlencoded(handler: BaseHTTPRequestHandler) -> dict[str, list[str]]:
+    length = int(handler.headers.get("Content-Length") or 0)
+    raw = handler.rfile.read(length).decode("utf-8", errors="replace")
+    return parse_qs(raw)
 
 
 def set_ai_job(run_id: str, **updates: object) -> None:
@@ -1369,8 +1988,11 @@ def page(title: str, body: str, wide: bool = False) -> bytes:
       <span>Сравнение КП</span>
     </a>
     <nav class="header-links" aria-label="Навигация">
+      <a href="/">Сервис</a>
+      <a href="/admin">Админка</a>
       <a href="/#how-it-works">Помощь</a>
       <a href="/privacy">Политика</a>
+      <a href="/logout">Выход</a>
     </nav>
   </header>
   <main class="{shell_class}">{body}</main>
@@ -2004,6 +2626,7 @@ def render_review(run_id: str) -> bytes:
     request_items, matches, errors = load_state(run_dir)
     stats = stats_for(request_items, matches)
     match_percent = round((stats["matched"] / stats["comparable"]) * 100, 1) if stats["comparable"] else 0
+    history_hints = history_hints_for_request_items(request_items)
     review_rows = [
         (idx, match)
         for idx, match in enumerate(matches)
@@ -2034,6 +2657,7 @@ def render_review(run_id: str) -> bytes:
                     f'title="{esc(full)}">{esc(suggestion.pos)} <span class="suggestion-label">совпадение {round(score * 100)}%</span></button>'
                 )
             suggestion_buttons += "</div>"
+        history_hint = history_hint_html(selected_item.pos, history_hints) if selected_item else ""
         match_input = f"""
 <select class="match-input with-tooltip" name="match_{idx}" title="{esc(selected_title)}" autocomplete="off">
   <option value="">Не сопоставлять</option>
@@ -2043,7 +2667,8 @@ def render_review(run_id: str) -> bytes:
   <button class="clear-match" type="button" data-clear-match>Не сопоставлять</button>
   <span class="match-help">Если строка КП лишняя или не относится к заявке.</span>
 </div>
-{suggestion_buttons}"""
+{suggestion_buttons}
+{history_hint}"""
         status_class = "unmatched" if not match.request_pos else match.status
         if status_class not in {"auto", "review", "unmatched", "manual", "service"}:
             status_class = "review"
@@ -2222,7 +2847,8 @@ def render_privacy() -> bytes:
   <ul>
     <li>сведения из загружаемых файлов заявки, ТЗ, КП, счетов и PDF-документов;</li>
     <li>контактные данные, реквизиты организаций, ФИО, телефоны, адреса электронной почты, если они содержатся в файлах;</li>
-    <li>технические данные запроса: IP-адрес, дата и время обращения, сведения о браузере и системные журналы сервера.</li>
+    <li>данные авторизации администратора: логин, технический идентификатор сессии и время входа;</li>
+    <li>технические данные запроса: IP-адрес, дата и время обращения, сведения о браузере, session-cookie и системные журналы сервера.</li>
   </ul>
 
   <h3>3. Цели обработки</h3>
@@ -2232,24 +2858,414 @@ def render_privacy() -> bytes:
   <p>Обработка выполняется на основании согласия пользователя, выраженного отметкой чекбокса перед отправкой файлов, а также для исполнения действия, запрошенного пользователем в сервисе.</p>
 
   <h3>5. Передача третьим лицам</h3>
-  <p>Для автоматического сопоставления позиций сервис может использовать внешнего поставщика AI-инфраструктуры и API обработки текста. В такие API могут передаваться фрагменты данных из загруженных документов только в объеме, необходимом для сравнения позиций и формирования отчета.</p>
+  <p>Для автоматического сопоставления позиций сервис может использовать внешнего поставщика AI-инфраструктуры, включая DeepSeek/API обработки текста при включенном ИИ. В такие API могут передаваться фрагменты данных из загруженных документов только в объеме, необходимом для сравнения позиций и формирования отчета.</p>
   <p>Сервис не продает персональные данные и не передает их третьим лицам для рекламных целей.</p>
 
   <h3>6. Хранение и защита</h3>
-  <p>Загруженные файлы и сформированные отчеты хранятся на сервере сервиса до 30 календарных дней, если более длительное хранение не требуется для обработки обращения пользователя или исполнения требований закона. После истечения срока данные могут быть удалены автоматически или вручную.</p>
-  <p>Доступ к серверу ограничивается техническими средствами администрирования.</p>
+  <p>Загруженные файлы, история обработок, база прошлых закупок, подтвержденные ручные сопоставления и сформированные отчеты хранятся на сервере сервиса для работы истории, админки, повторной проверки и самообучения сопоставлений. Срок хранения определяется оператором исходя из целей использования сервиса, требований закона и обращений пользователя.</p>
+  <p>Доступ к рабочим страницам сервиса ограничивается логином и паролем. Сессия пользователя хранится в технической HttpOnly cookie, необходимой для авторизации и защиты закрытых разделов.</p>
+  <p>В сервисе применяются меры разграничения прав доступа, учет действий администратора с данными, журналирование входов, импортов и обработок, а также технические меры защиты серверной инфраструктуры. Эти меры учитывают требования к защите и учету действий в информационных системах персональных данных.</p>
 
   <h3>7. Cookies и аналитика</h3>
-  <p>Сайт показывает уведомление о cookies и технических данных. Сервис не подключает рекламную аналитику и не использует cookies для отслеживания пользователей. Выбор в уведомлении сохраняется локально в браузере, чтобы не показывать баннер повторно.</p>
+  <p>Сайт использует только необходимые технические cookies: session-cookie для авторизации и локальное сохранение выбора в уведомлении о cookies. Рекламная аналитика и cookies для отслеживания пользователей не подключены.</p>
 
   <h3>8. Права пользователя</h3>
   <p>Пользователь может запросить информацию об обработке данных, уточнение или удаление загруженных материалов и результатов обработки, если такие данные сохраняются на сервере.</p>
 
   <h3>9. Контакты</h3>
   <p>По вопросам обработки персональных данных, уточнения или удаления данных можно обратиться к оператору: Меренов Кирилл Олегович, email <a href="mailto:Merenov.kirill@mail.ru">Merenov.kirill@mail.ru</a>.</p>
+  <p>Форма уведомления оператора персональных данных размещена на официальном портале Роскомнадзора: <a href="https://pd.rkn.gov.ru/operators-registry/notification/" target="_blank" rel="noopener">pd.rkn.gov.ru/operators-registry/notification/</a>.</p>
 </section>
 """
     return page("Политика обработки персональных данных", body)
+
+
+def render_login(error: str = "", next_url: str = "/") -> bytes:
+    error_html = f'<div class="notice error">{esc(error)}</div>' if error else ""
+    config_notice = ""
+    if not ADMIN_PASSWORD_HASH and not ADMIN_PASSWORD and not ALLOW_DEV_ADMIN:
+        config_notice = '<div class="notice warn">Пароль администратора не настроен. Задайте ADMIN_PASSWORD_HASH или ADMIN_PASSWORD в переменных окружения.</div>'
+    body = f"""
+<section class="auth-shell panel">
+  <span class="ready-badge">Доступ</span>
+  <h1>Вход в сервис</h1>
+  <p class="subtitle">Введите логин и пароль администратора, чтобы работать с загрузкой КП, историей и базой закупок.</p>
+  {error_html}
+  {config_notice}
+  <form class="auth-form" action="/login" method="post">
+    <input type="hidden" name="next" value="{esc(next_url)}">
+    <label>
+      Логин
+      <input class="text-input" type="text" name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>
+      Пароль
+      <input class="text-input" type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button class="btn primary-wide" type="submit">Войти</button>
+  </form>
+</section>
+"""
+    return page("Вход", body)
+
+
+def admin_tabs(active: str) -> str:
+    items = [
+        ("history", "/admin/history", "История обработок"),
+        ("purchases", "/admin/purchases", "База закупок"),
+        ("audit", "/admin/audit", "Журнал действий"),
+    ]
+    return '<nav class="admin-tabs" aria-label="Админка">' + "".join(
+        f'<a class="{"is-active" if key == active else ""}" href="{href}">{label}</a>'
+        for key, href, label in items
+    ) + "</nav>"
+
+
+def load_json_list(value: str) -> list:
+    try:
+        data = json.loads(value or "[]")
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def render_admin(query: dict[str, list[str]] | None = None) -> bytes:
+    query = query or {}
+    status_filter = clean_text(query.get("status", [""])[0])
+    supplier_filter = clean_text(query.get("supplier", [""])[0])
+    date_from = clean_text(query.get("date_from", [""])[0])
+    date_to = clean_text(query.get("date_to", [""])[0])
+    percent_min = parse_number(query.get("percent_min", [""])[0])
+    where = []
+    params: list[object] = []
+    if status_filter:
+        where.append("status = ?")
+        params.append(status_filter)
+    if supplier_filter:
+        where.append("suppliers_json LIKE ?")
+        params.append(f"%{supplier_filter}%")
+    if date_from:
+        where.append("created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        where.append("created_at <= ?")
+        params.append(date_to + "T23:59:59Z")
+    if percent_min is not None:
+        where.append("match_percent >= ?")
+        params.append(percent_min)
+    sql = "SELECT * FROM runs"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC LIMIT 200"
+    with db_connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        total_runs = conn.execute("SELECT COUNT(*) AS c FROM runs").fetchone()["c"]
+        imported_rows = conn.execute("SELECT COUNT(*) AS c FROM purchase_history").fetchone()["c"]
+        learned_rows = conn.execute("SELECT COUNT(*) AS c FROM learning_matches").fetchone()["c"]
+    table_rows = ""
+    for row in rows:
+        request_files = ", ".join(load_json_list(row["request_files_json"]))
+        offer_files = load_json_list(row["offer_files_json"])
+        suppliers = ", ".join(load_json_list(row["suppliers_json"]))
+        errors = load_json_list(row["errors_json"])
+        table_rows += f"""
+<tr>
+  <td><b>{esc(row["created_at"])}</b><div class="table-note">{esc(row["run_id"])}</div></td>
+  <td><span class="status {esc(row["status"])}">{esc(row["status"])}</span></td>
+  <td>{esc(request_files)}<div class="table-note">КП: {esc(len(offer_files))} файл(ов)</div></td>
+  <td>{esc(suppliers or "—")}</td>
+  <td>{esc(row["request_count"])} / {esc(row["comparable_count"])}<div class="table-note">позиций / товарных строк</div></td>
+  <td><b>{esc(row["match_percent"])}%</b><div class="table-note">спорные: {esc(row["review_count"])} · не найдены: {esc(row["unmatched_count"])}</div></td>
+  <td>
+    <div class="admin-actions">
+      <a class="btn secondary" href="/review/{esc(row["run_id"])}">Проверка</a>
+      <a class="btn secondary" href="/download/{esc(row["run_id"])}/summary.xlsx">Excel</a>
+      <a class="btn secondary" href="/download/{esc(row["run_id"])}/review.xlsx">Review</a>
+    </div>
+    {f'<div class="table-note">Ошибки: {esc("; ".join(str(item) for item in errors[:2]))}</div>' if errors else ''}
+  </td>
+</tr>"""
+    if not table_rows:
+        table_rows = '<tr><td colspan="7" class="table-note">История пока пустая или ничего не найдено по фильтрам.</td></tr>'
+    body = f"""
+<div class="topbar">
+  <div>
+    <h1>Админка</h1>
+    <p class="subtitle">История обработок, отчеты, импорт базы прошлых закупок и журнал действий.</p>
+  </div>
+</div>
+<section class="admin-layout">
+  {admin_tabs("history")}
+  <div class="metric-grid">
+    <div class="metric-card"><span>Обработок в истории</span><b>{esc(total_runs)}</b></div>
+    <div class="metric-card"><span>Строк базы закупок</span><b>{esc(imported_rows)}</b></div>
+    <div class="metric-card"><span>Подтверждений в самообучении</span><b>{esc(learned_rows)}</b></div>
+    <div class="metric-card"><span>Новые отчеты</span><b>SQLite</b></div>
+  </div>
+  <section class="panel">
+    <form class="admin-filter" action="/admin" method="get">
+      <label>Дата от<input class="text-input" type="date" name="date_from" value="{esc(date_from)}"></label>
+      <label>Дата до<input class="text-input" type="date" name="date_to" value="{esc(date_to)}"></label>
+      <label>Поставщик<input class="text-input" type="text" name="supplier" value="{esc(supplier_filter)}" placeholder="Название"></label>
+      <label>Статус<input class="text-input" type="text" name="status" value="{esc(status_filter)}" placeholder="done"></label>
+      <label>% от<input class="text-input" type="text" name="percent_min" value="{esc(query.get("percent_min", [""])[0])}" placeholder="80"></label>
+      <button class="btn" type="submit">Фильтровать</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Статус</th><th>Файлы</th><th>Поставщики</th><th>Объем</th><th>Сопоставление</th><th>Отчеты</th>
+          </tr>
+        </thead>
+        <tbody>{table_rows}</tbody>
+      </table>
+    </div>
+  </section>
+</section>
+"""
+    return page("Админка", body, wide=True)
+
+
+def render_purchases(message: str = "", warnings: list[str] | None = None) -> bytes:
+    warnings = warnings or []
+    with db_connect() as conn:
+        count = conn.execute("SELECT COUNT(*) AS c FROM purchase_history").fetchone()["c"]
+        rows = conn.execute(
+            """
+            SELECT imported_at, source_file, position_name, supplier, supplier_inn, price, purchase_date, unit, qty, total
+            FROM purchase_history
+            ORDER BY imported_at DESC, id DESC
+            LIMIT 300
+            """
+        ).fetchall()
+    notice = f'<div class="notice">{esc(message)}</div>' if message else ""
+    warning_html = "".join(f'<div class="notice warn">{esc(item)}</div>' for item in warnings)
+    table_rows = ""
+    for row in rows:
+        table_rows += f"""
+<tr>
+  <td>{esc(row["imported_at"])}<div class="table-note">{esc(row["source_file"])}</div></td>
+  <td>{esc(row["position_name"])}</td>
+  <td>{esc(row["supplier"])}<div class="table-note">{esc(row["supplier_inn"])}</div></td>
+  <td>{esc(format_money(row["price"]))}</td>
+  <td>{esc(row["qty"])} {esc(row["unit"])}</td>
+  <td>{esc(format_money(row["total"]))}</td>
+  <td>{esc(row["purchase_date"])}</td>
+</tr>"""
+    if not table_rows:
+        table_rows = '<tr><td colspan="7" class="table-note">База прошлых закупок пока не импортирована.</td></tr>'
+    body = f"""
+<div class="topbar">
+  <div>
+    <h1>База прошлых закупок</h1>
+    <p class="subtitle">Импортируйте Excel-базу: сервис будет показывать прошлых лидеров по цене и историю тендеров.</p>
+  </div>
+</div>
+<section class="admin-layout">
+  {admin_tabs("purchases")}
+  {notice}
+  {warning_html}
+  <section class="panel">
+    <h2>Импорт Excel</h2>
+    <p class="subtitle">Поддерживаются колонки: позиция/наименование, поставщик, ИНН, цена, дата закупки, единица, количество, сумма, источник. Если часть колонок отсутствует, импортируются доступные данные.</p>
+    <form class="import-form" action="/admin/import-purchases" method="post" enctype="multipart/form-data">
+      <label>
+        Excel-файл базы
+        <input class="text-input" type="file" name="purchase_base" accept=".xlsx,.xlsm" required>
+      </label>
+      <button class="btn" type="submit">Импортировать</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="review-card-head">
+      <div>
+        <h2>Загружено строк: {esc(count)}</h2>
+        <p>Ниже показаны последние 300 строк базы.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>Импорт</th><th>Позиция</th><th>Поставщик</th><th>Цена</th><th>Количество</th><th>Сумма</th><th>Дата</th></tr></thead>
+        <tbody>{table_rows}</tbody>
+      </table>
+    </div>
+  </section>
+</section>
+"""
+    return page("База закупок", body, wide=True)
+
+
+def render_audit() -> bytes:
+    with db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT created_at, username, action, object_type, object_id, ip, details_json
+            FROM audit_log
+            ORDER BY id DESC
+            LIMIT 300
+            """
+        ).fetchall()
+    table_rows = ""
+    for row in rows:
+        table_rows += f"""
+<tr>
+  <td>{esc(row["created_at"])}</td>
+  <td>{esc(row["username"] or "—")}</td>
+  <td><b>{esc(row["action"])}</b><div class="audit-line">{esc(row["object_type"])} {esc(row["object_id"])}</div></td>
+  <td>{esc(row["ip"])}</td>
+  <td class="table-note">{esc(row["details_json"])}</td>
+</tr>"""
+    if not table_rows:
+        table_rows = '<tr><td colspan="5" class="table-note">Журнал пока пустой.</td></tr>'
+    body = f"""
+<div class="topbar">
+  <div>
+    <h1>Журнал действий</h1>
+    <p class="subtitle">Технический учет входов, обработок, импортов и формирования отчетов.</p>
+  </div>
+</div>
+<section class="admin-layout">
+  {admin_tabs("audit")}
+  <section class="panel">
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>IP</th><th>Детали</th></tr></thead>
+        <tbody>{table_rows}</tbody>
+      </table>
+    </div>
+  </section>
+</section>
+"""
+    return page("Журнал действий", body, wide=True)
+
+
+def normalize_column_name(value: object) -> str:
+    text = clean_text(value).lower().replace("ё", "е")
+    text = re.sub(r"[^0-9a-zа-я]+", " ", text)
+    return " ".join(text.split())
+
+
+def detect_purchase_columns(headers: list[object]) -> dict[str, int]:
+    aliases = {
+        "position_name": ["позиция", "наименование", "товар", "описание", "номенклатура", "материал"],
+        "supplier": ["поставщик", "контрагент", "продавец", "организация"],
+        "supplier_inn": ["инн"],
+        "price": ["цена за ед", "цена за единицу", "цена", "расценка"],
+        "purchase_date": ["дата закупки", "дата", "период"],
+        "unit": ["единица", "ед изм", "ед", "единица измерения"],
+        "qty": ["количество", "кол во", "кол-во", "объем"],
+        "total": ["сумма", "стоимость", "итого"],
+    }
+    normalized = [normalize_column_name(header) for header in headers]
+    result: dict[str, int] = {}
+    for key, variants in aliases.items():
+        for idx, header in enumerate(normalized):
+            if not header:
+                continue
+            if any(variant in header for variant in variants):
+                result[key] = idx
+                break
+    return result
+
+
+def cell_value(row: tuple, column_map: dict[str, int], key: str) -> object:
+    idx = column_map.get(key)
+    if idx is None or idx >= len(row):
+        return ""
+    return row[idx]
+
+
+def cell_text(row: tuple, column_map: dict[str, int], key: str) -> str:
+    value = cell_value(row, column_map, key)
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    return clean_text(value)
+
+
+def import_purchase_base(upload: UploadedFile) -> tuple[int, list[str]]:
+    warnings: list[str] = []
+    wb = load_workbook(upload.file, data_only=True, read_only=True)
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    header_row: list[object] = []
+    skipped = 0
+    column_map: dict[str, int] = {}
+    for row_idx, row in enumerate(rows_iter, start=1):
+        row_values = list(row)
+        candidate = detect_purchase_columns(row_values)
+        if "position_name" in candidate or len(candidate) >= 3:
+            header_row = row_values
+            column_map = candidate
+            skipped = row_idx
+            break
+    if not header_row:
+        warnings.append("Не удалось уверенно определить строку заголовков. Импорт остановлен.")
+        return 0, warnings
+    required = {
+        "position_name": "позиция/наименование",
+        "supplier": "поставщик",
+        "price": "цена",
+        "purchase_date": "дата закупки",
+        "unit": "единица измерения",
+        "qty": "количество",
+        "total": "сумма",
+        "supplier_inn": "ИНН",
+    }
+    missing = [label for key, label in required.items() if key not in column_map]
+    if missing:
+        warnings.append("Не найдены колонки: " + ", ".join(missing) + ". Доступные данные импортированы.")
+    imported = 0
+    imported_at = now_iso()
+    with db_connect() as conn:
+        for row in ws.iter_rows(min_row=skipped + 1, values_only=True):
+            position_name = cell_text(row, column_map, "position_name")
+            if not position_name:
+                continue
+            raw = {str(header_row[idx] or f"col_{idx + 1}"): value for idx, value in enumerate(row)}
+            conn.execute(
+                """
+                INSERT INTO purchase_history (
+                    imported_at, source_file, position_name, supplier, supplier_inn,
+                    price, purchase_date, unit, qty, total, raw_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    imported_at,
+                    upload.filename,
+                    position_name,
+                    cell_text(row, column_map, "supplier"),
+                    cell_text(row, column_map, "supplier_inn"),
+                    parse_number(str(cell_value(row, column_map, "price") or "")),
+                    cell_text(row, column_map, "purchase_date"),
+                    cell_text(row, column_map, "unit"),
+                    parse_number(str(cell_value(row, column_map, "qty") or "")),
+                    parse_number(str(cell_value(row, column_map, "total") or "")),
+                    json_dumps(raw),
+                ),
+            )
+            imported += 1
+    if imported == 0:
+        warnings.append("В файле не найдено строк с заполненной позицией.")
+    return imported, warnings
+
+
+def history_hint_html(request_pos: str, hints: dict[str, list[dict[str, object]]]) -> str:
+    rows = hints.get(request_pos) or []
+    if not rows:
+        return ""
+    lines = []
+    for item in rows[:3]:
+        price = format_money(item.get("price"))
+        unit = item.get("unit") or ""
+        supplier = item.get("supplier") or "поставщик не указан"
+        date = item.get("purchase_date") or "дата не указана"
+        inn = f", ИНН {item.get('supplier_inn')}" if item.get("supplier_inn") else ""
+        lines.append(f'<span>{esc(supplier)}{esc(inn)} · {esc(price or "цена не указана")} {esc("/" + str(unit) if unit else "")} · {esc(date)}</span>')
+    return '<div class="history-hint"><b>Прошлые закупки</b>' + "".join(lines) + "</div>"
 
 
 def build_request_template() -> bytes:
@@ -2453,6 +3469,53 @@ def read_request_or_base_offer(path: Path) -> tuple[list[RequestItem], list[Supp
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "TZKP/0.1"
 
+    def client_ip(self) -> str:
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip()
+        return self.client_address[0] if self.client_address else ""
+
+    def is_secure_request(self) -> bool:
+        return self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+    def current_user(self) -> str:
+        cookie = parse_cookie_header(self.headers.get("Cookie", ""))
+        morsel = cookie.get(SESSION_COOKIE)
+        if not morsel:
+            return ""
+        return verify_session(morsel.value)
+
+    def is_authenticated(self) -> bool:
+        return bool(self.current_user())
+
+    def session_cookie_header(self, username: str) -> str:
+        parts = [
+            f"{SESSION_COOKIE}={sign_session(username)}",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            f"Max-Age={SESSION_TTL_SECONDS}",
+        ]
+        if self.is_secure_request():
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def clear_session_cookie_header(self) -> str:
+        parts = [f"{SESSION_COOKIE}=", "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"]
+        if self.is_secure_request():
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def require_auth(self, path: str) -> bool:
+        if self.is_authenticated():
+            return True
+        if self.wants_json() or path.startswith("/progress/"):
+            self.send_json({"state": "error", "message": "Требуется вход в сервис."}, HTTPStatus.UNAUTHORIZED)
+            return False
+        next_url = path if path.startswith("/") else "/"
+        self.redirect(f"/login?next={quote(next_url)}")
+        return False
+
     def send_html(self, content: bytes, status: HTTPStatus = HTTPStatus.OK) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2495,11 +3558,41 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/login":
+            next_url = parse_qs(parsed.query).get("next", ["/"])[0] or "/"
+            self.send_html(render_login(next_url=next_url))
+            return
+        if path == "/logout":
+            log_action("logout", username=self.current_user(), ip=self.client_ip())
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", self.clear_session_cookie_header())
+            self.end_headers()
+            return
         if path == "/":
+            if not self.require_auth(path):
+                return
             self.send_html(render_home())
             return
         if path == "/privacy":
             self.send_html(render_privacy())
+            return
+        if path in {"/admin", "/admin/history"}:
+            if not self.require_auth(path):
+                return
+            self.send_html(render_admin(parse_qs(parsed.query)))
+            return
+        if path == "/admin/purchases":
+            if not self.require_auth(path):
+                return
+            self.send_html(render_purchases())
+            return
+        if path == "/admin/audit":
+            if not self.require_auth(path):
+                return
+            self.send_html(render_audit())
+            return
+        if path not in PUBLIC_GET_PATHS and not self.require_auth(path):
             return
         if path == "/template/request.xlsx":
             self.send_file_bytes(
@@ -2538,6 +3631,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path not in PUBLIC_GET_PATHS and not self.require_auth(parsed.path):
+            return
         if parsed.path.startswith("/download/"):
             self.serve_download(parsed.path, send_body=False)
             return
@@ -2545,8 +3640,16 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/login":
+            self.handle_login()
+            return
+        if parsed.path not in PUBLIC_POST_PATHS and not self.require_auth(parsed.path):
+            return
         if parsed.path == "/process":
             self.handle_process()
+            return
+        if parsed.path == "/admin/import-purchases":
+            self.handle_import_purchases()
             return
         if parsed.path.startswith("/finalize/"):
             run_id = safe_filename(unquote(parsed.path.removeprefix("/finalize/")), "run")
@@ -2557,6 +3660,54 @@ class AppHandler(BaseHTTPRequestHandler):
             self.handle_rerun_ai(run_id)
             return
         self.send_html(render_home("Неверный адрес формы."), HTTPStatus.NOT_FOUND)
+
+    def handle_login(self) -> None:
+        form = parse_form_urlencoded(self)
+        username = clean_text(form.get("username", [""])[0])
+        password = form.get("password", [""])[0]
+        next_url = form.get("next", ["/"])[0] or "/"
+        if not next_url.startswith("/") or next_url.startswith("//"):
+            next_url = "/"
+        if hmac.compare_digest(username, ADMIN_USERNAME) and verify_password(password):
+            log_action("login", username=username, ip=self.client_ip())
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", next_url)
+            self.send_header("Set-Cookie", self.session_cookie_header(username))
+            self.end_headers()
+            return
+        log_action("login_failed", username=username, ip=self.client_ip())
+        self.send_html(render_login("Неверный логин или пароль.", next_url=next_url), HTTPStatus.UNAUTHORIZED)
+
+    def handle_import_purchases(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_UPLOAD_SIZE:
+            self.send_html(render_purchases("Файл слишком большой."), HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
+        body = self.rfile.read(length)
+        uploads = parse_multipart_upload(self.headers, body)
+        files = [field for field in uploads.get("purchase_base", []) if field.filename]
+        if not files:
+            self.send_html(render_purchases("Выберите Excel-файл базы закупок."), HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            imported, warnings = import_purchase_base(files[0])
+            log_action(
+                "purchase_import",
+                username=self.current_user(),
+                object_type="purchase_history",
+                ip=self.client_ip(),
+                details={"filename": files[0].filename, "rows": imported, "warnings": warnings},
+            )
+            self.send_html(render_purchases(f"Импортировано строк: {imported}.", warnings))
+        except Exception as exc:  # noqa: BLE001
+            log_action(
+                "purchase_import_error",
+                username=self.current_user(),
+                object_type="purchase_history",
+                ip=self.client_ip(),
+                details={"filename": files[0].filename, "error": str(exc)},
+            )
+            self.send_html(render_purchases(f"Не удалось импортировать файл: {exc}"), HTTPStatus.BAD_REQUEST)
 
     def handle_process(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
@@ -2596,6 +3747,24 @@ class AppHandler(BaseHTTPRequestHandler):
             with target.open("wb") as dst:
                 shutil.copyfileobj(field.file, dst)
             offer_paths.append(target)
+        request_file_names = [request_path.name]
+        offer_file_names = [path.name for path in offer_paths]
+        actor_username = self.current_user()
+        actor_ip = self.client_ip()
+        record_run_metadata(
+            run_id,
+            status="running",
+            request_files=request_file_names,
+            offer_files=offer_file_names,
+        )
+        log_action(
+            "process_start",
+            username=actor_username,
+            object_type="run",
+            object_id=run_id,
+            ip=actor_ip,
+            details={"request_files": request_file_names, "offer_files": offer_file_names},
+        )
 
         def update_progress(percent: int, message: str) -> None:
             set_ai_job(
@@ -2636,12 +3805,23 @@ class AppHandler(BaseHTTPRequestHandler):
 
                 update_progress(42, "Сопоставляем товары по названиям, синонимам и единицам")
                 matches = build_matches(request_items, supplier_items, progress_callback=update_ai_progress)
+                matches = apply_learning_suggestions(request_items, matches)
                 errors.extend(get_ai_warnings())
 
                 update_progress(93, "Формируем файл проверки и итоговый Excel")
                 write_review(run_dir / "review.xlsx", matches, request_items)
-                write_final(run_dir / "summary.xlsx", request_items, matches)
+                history_hints = history_hints_for_request_items(request_items)
+                write_final(run_dir / "summary.xlsx", request_items, matches, history_hints=history_hints)
                 save_state(run_dir, request_items, matches, errors)
+                record_run_metadata(
+                    run_id,
+                    status="done",
+                    request_files=request_file_names,
+                    offer_files=offer_file_names,
+                    request_items=request_items,
+                    matches=matches,
+                    errors=errors,
+                )
 
                 comparable = [match for match in matches if match.status != "service"]
                 total = len(comparable)
@@ -2656,7 +3836,23 @@ class AppHandler(BaseHTTPRequestHandler):
                     message=f"Готово. Сопоставлено {percent}% товарных строк",
                     redirect=f"/review/{run_id}",
                 )
+                log_action("process_done", username=actor_username, object_type="run", object_id=run_id, ip=actor_ip)
             except Exception as exc:  # noqa: BLE001
+                record_run_metadata(
+                    run_id,
+                    status="error",
+                    request_files=request_file_names,
+                    offer_files=offer_file_names,
+                    errors=[str(exc)],
+                )
+                log_action(
+                    "process_error",
+                    username=actor_username,
+                    object_type="run",
+                    object_id=run_id,
+                    ip=actor_ip,
+                    details={"error": str(exc)},
+                )
                 set_ai_job(
                     run_id,
                     state="error",
@@ -2719,8 +3915,25 @@ class AppHandler(BaseHTTPRequestHandler):
                     updated.append(Match(supplier_item, match.request_pos, match.score, match.status, match.reason, note))
 
             write_review(run_dir / "review.xlsx", updated, request_items)
-            write_final(run_dir / "summary.xlsx", request_items, updated)
+            history_hints = history_hints_for_request_items(request_items)
+            write_final(run_dir / "summary.xlsx", request_items, updated, history_hints=history_hints)
             save_state(run_dir, request_items, updated, errors)
+            learned_count = save_learning_matches(run_id, request_items, updated)
+            record_run_metadata(
+                run_id,
+                status="finalized",
+                request_items=request_items,
+                matches=updated,
+                errors=errors,
+            )
+            log_action(
+                "finalize",
+                username=self.current_user(),
+                object_type="run",
+                object_id=run_id,
+                ip=self.client_ip(),
+                details={"learned_matches": learned_count},
+            )
             self.redirect(f"/done/{run_id}")
         finally:
             run_lock.release()
@@ -2734,6 +3947,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if existing.get("state") == "running":
             self.send_json(existing)
             return
+        actor_username = self.current_user()
+        actor_ip = self.client_ip()
 
         def update_progress(current: int, total: int, message: str) -> None:
             percent = round((current / total) * 100) if total else 0
@@ -2753,11 +3968,20 @@ class AppHandler(BaseHTTPRequestHandler):
                 request_items, matches, errors = load_state(run_dir)
                 supplier_items = [match.supplier_item for match in matches]
                 updated = build_matches(request_items, supplier_items, progress_callback=update_progress)
+                updated = apply_learning_suggestions(request_items, updated)
                 clean_errors = [error for error in errors if not error.startswith("DeepSeek ")]
                 clean_errors.extend(get_ai_warnings())
                 write_review(run_dir / "review.xlsx", updated, request_items)
-                write_final(run_dir / "summary.xlsx", request_items, updated)
+                history_hints = history_hints_for_request_items(request_items)
+                write_final(run_dir / "summary.xlsx", request_items, updated, history_hints=history_hints)
                 save_state(run_dir, request_items, updated, clean_errors)
+                record_run_metadata(
+                    run_id,
+                    status="done",
+                    request_items=request_items,
+                    matches=updated,
+                    errors=clean_errors,
+                )
                 comparable = [match for match in updated if match.status != "service"]
                 total = len(comparable)
                 matched = sum(1 for match in comparable if match.request_pos)
@@ -2771,7 +3995,16 @@ class AppHandler(BaseHTTPRequestHandler):
                     message=f"Готово. Сопоставлено {percent}%",
                     redirect=f"/review/{run_id}",
                 )
+                log_action("rerun_ai_done", username=actor_username, object_type="run", object_id=run_id, ip=actor_ip)
             except Exception as exc:  # noqa: BLE001
+                log_action(
+                    "rerun_ai_error",
+                    username=actor_username,
+                    object_type="run",
+                    object_id=run_id,
+                    ip=actor_ip,
+                    details={"error": str(exc)},
+                )
                 set_ai_job(run_id, state="error", percent=0, message=f"Ошибка ИИ-проверки: {exc}", redirect=f"/review/{run_id}")
 
         set_ai_job(run_id, state="running", current=0, total=0, percent=0, message="Запускаем ИИ-проверку", redirect=f"/review/{run_id}")
@@ -2820,6 +4053,7 @@ def main() -> None:
     if len(sys.argv) > 1:
         port = int(sys.argv[1])
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    init_db()
     server = ThreadingHTTPServer((host, port), AppHandler)
     print(f"Сервис запущен: http://{host}:{port}")
     print("Остановить: Ctrl+C")

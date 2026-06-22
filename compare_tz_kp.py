@@ -2950,7 +2950,12 @@ def normalized_unit_price(request: RequestItem, offer: SupplierItem) -> tuple[fl
     return offer.price, display
 
 
-def write_final(path: Path, request_items: list[RequestItem], matches: list[Match]) -> None:
+def write_final(
+    path: Path,
+    request_items: list[RequestItem],
+    matches: list[Match],
+    history_hints: dict[str, list[dict[str, object]]] | None = None,
+) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "Сводка"
@@ -3391,6 +3396,56 @@ def write_final(path: Path, request_items: list[RequestItem], matches: list[Matc
             for cell in service[col_letter][1:]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.00 ₽'
+
+    if history_hints:
+        history_sheet = wb.create_sheet("История закупок")
+        headers = [
+            "Позиция заявки",
+            "Наименование заявки",
+            "Похожая позиция из базы",
+            "Поставщик",
+            "ИНН",
+            "Цена",
+            "Дата закупки",
+            "Ед.",
+            "Кол-во",
+            "Сумма",
+            "Источник",
+            "Сходство",
+        ]
+        history_sheet.append(headers)
+        request_by_pos = {item.pos: item for item in request_items}
+        for request_pos, hints in history_hints.items():
+            request = request_by_pos.get(request_pos)
+            for hint in hints:
+                history_sheet.append(
+                    [
+                        request_pos,
+                        request.name if request else "",
+                        hint.get("position_name", ""),
+                        hint.get("supplier", ""),
+                        hint.get("supplier_inn", ""),
+                        hint.get("price"),
+                        hint.get("purchase_date", ""),
+                        hint.get("unit", ""),
+                        hint.get("qty"),
+                        hint.get("total"),
+                        hint.get("source_file", ""),
+                        hint.get("score"),
+                    ]
+                )
+        style_sheet(history_sheet)
+        widths = {"A": 14, "B": 70, "C": 70, "D": 24, "E": 16, "F": 14, "G": 16, "H": 10, "I": 12, "J": 14, "K": 24, "L": 12}
+        for col_letter, width in widths.items():
+            history_sheet.column_dimensions[col_letter].width = width
+        history_sheet.freeze_panes = "A2"
+        for col_letter in ("F", "J"):
+            for cell in history_sheet[col_letter][1:]:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0.00 ₽'
+        for cell in history_sheet["L"][1:]:
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = '0.0%'
 
     atomic_save_workbook(wb, path)
 

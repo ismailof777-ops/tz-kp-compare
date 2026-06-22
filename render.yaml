@@ -17,3 +17,9 @@ services:
         value: "300"
       - key: DEEPSEEK_BATCH_SIZE
         value: "20"
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
